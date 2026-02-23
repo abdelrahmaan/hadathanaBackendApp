@@ -232,9 +232,14 @@ python mongo_migration/pre_processing.py
 
 # Step 2 — upload processed files to MongoDB Atlas
 python mongo_migration/upload.py
+
+# Step 3 — compute narrator statistics (teachers, students, hadith counts)
+python mongo_migration/compute_narrator_stats.py
 ```
 
-This populates three collections: `bukhari_book`, `narrators`, `hadith_pages`.
+This populates four collections: `bukhari_book`, `narrators`, `hadith_pages`, `narrator_stats`.
+
+`compute_narrator_stats.py` is idempotent — re-run it any time after new hadiths are added.
 
 ### Endpoints
 
@@ -244,6 +249,7 @@ This populates three collections: `bukhari_book`, `narrators`, `hadith_pages`.
 | GET | `/api/v1/hadiths/{id}` | — | `Hadith` |
 | GET | `/api/v1/narrators` | `name_plain`, `kunya`, `nasab`, `skip`, `limit` | `PaginatedNarrators` |
 | GET | `/api/v1/narrators/{id}` | — | `Narrator` |
+| GET | `/api/v1/narrators/{id}/stats` | — | `NarratorStats` |
 
 #### Example requests
 

@@ -22,3 +22,7 @@ def get_narrators_collection(db):
 
 def get_hadith_pages_collection(db):
     return db["hadith_pages"]
+
+
+def get_narrator_stats_collection(db):
+    return db["narrator_stats"]

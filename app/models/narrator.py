@@ -24,3 +24,16 @@ class Narrator(BaseModel):
 class PaginatedNarrators(BaseModel):
     items: list[Narrator]
     total: int
+
+
+class NarratorRelation(BaseModel):
+    narrator_id: int
+    name: str
+    freq: int
+
+
+class NarratorStats(BaseModel):
+    narrator_id: int
+    hadith_count: int
+    teachers: list[NarratorRelation]
+    students: list[NarratorRelation]

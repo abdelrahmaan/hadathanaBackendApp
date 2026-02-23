@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 
-from ..database import get_client, get_db, get_narrators_collection
-from ..models.narrator import Narrator, PaginatedNarrators
+from ..database import get_client, get_db, get_narrators_collection, get_narrator_stats_collection
+from ..models.narrator import Narrator, NarratorStats, PaginatedNarrators
 
 router = APIRouter(prefix="/api/v1/narrators", tags=["narrators"])
 
@@ -52,3 +52,19 @@ async def get_narrator(narrator_id: int):
         raise HTTPException(status_code=404, detail="Narrator not found.")
 
     return _doc_to_narrator(doc)
+
+
+@router.get("/{narrator_id}/stats", response_model=NarratorStats)
+async def get_narrator_stats(narrator_id: int):
+    client = get_client()
+    db = get_db(client)
+    collection = get_narrator_stats_collection(db)
+
+    doc = await collection.find_one({"narrator_id": narrator_id})
+    client.close()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Narrator stats not found.")
+
+    doc.pop("_id", None)
+    return NarratorStats(**doc)
