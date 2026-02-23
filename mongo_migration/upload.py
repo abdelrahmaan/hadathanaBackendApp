@@ -33,7 +33,7 @@ MONGODB_URI = os.environ.get("MONGODB_URI")
 if not MONGODB_URI:
     sys.exit("ERROR: MONGODB_URI not found in environment / .env file")
 
-DB_NAME = "hadith_graph"
+DB_NAME = os.environ.get("DB_NAME", "HadithData")
 BATCH_SIZE = 500
 
 _PROCESSED = pathlib.Path(__file__).parent / "processed"

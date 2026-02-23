@@ -200,6 +200,113 @@ NEO4J_PASSWORD=password
 
 ---
 
+## hadathana-api (FastAPI + MongoDB)
+
+FastAPI backend for the Hadathana Islamic app — exposes the REST API consumed by the frontend.
+
+### Setup
+
+```bash
+# 1. Create and activate venv
+python -m venv venv && source venv/bin/activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Copy env template and fill in credentials
+cp .env.example .env
+
+# 4. Run dev server
+uvicorn app.main:app --reload
+```
+
+API docs: http://localhost:8000/docs
+
+### Populate the database
+
+Before the API returns data, run the migration pipeline:
+
+```bash
+# Step 1 — pre-process raw JSONL files into mongo_migration/processed/
+python mongo_migration/pre_processing.py
+
+# Step 2 — upload processed files to MongoDB Atlas
+python mongo_migration/upload.py
+```
+
+This populates three collections: `bukhari_book`, `narrators`, `hadith_pages`.
+
+### Endpoints
+
+| Method | Path | Query params | Response |
+|--------|------|-------------|----------|
+| GET | `/api/v1/hadiths` | `hadith_plain`, `narrator_id`, `chain_type`, `skip`, `limit` | `PaginatedHadiths` |
+| GET | `/api/v1/hadiths/{id}` | — | `Hadith` |
+| GET | `/api/v1/narrators` | `name_plain`, `kunya`, `nasab`, `skip`, `limit` | `PaginatedNarrators` |
+| GET | `/api/v1/narrators/{id}` | — | `Narrator` |
+
+#### Example requests
+
+```bash
+# List hadiths (first 20)
+curl http://localhost:8000/api/v1/hadiths
+
+# Full-text search on hadith body
+curl "http://localhost:8000/api/v1/hadiths?hadith_plain=نام"
+
+# Filter by narrator ID
+curl "http://localhost:8000/api/v1/hadiths?narrator_id=1234"
+
+# Get a single hadith by MongoDB ObjectId
+curl http://localhost:8000/api/v1/hadiths/<ObjectId>
+
+# Search narrators by name
+curl "http://localhost:8000/api/v1/narrators?name_plain=مالك"
+
+# Get a single narrator by MongoDB ObjectId
+curl http://localhost:8000/api/v1/narrators/<ObjectId>
+```
+
+#### Response shapes
+
+```jsonc
+// PaginatedHadiths
+{ "items": [ { "id": "...", "hadith_index": 1, "source": "bukhari",
+               "hadith": "...", "hadith_plain": "...", "matn_plain": [...],
+               "n_matn": 1, "n_chains": 2,
+               "chains": [{ "chain_id": "...", "type": "primary",
+                            "narrators": [{ "name": "...", "role": "narrator", "narrator_id": 1 }] }],
+               "unique_narrators": [{ "name": "...", "narrator_id": 1 }] }],
+  "total": 7230 }
+
+// PaginatedNarrators
+{ "items": [ { "id": "...", "narrator_id": 1, "name": "...", "name_plain": "...",
+               "kunya": "...", "nasab": "...", "death_date": "...", "tabaqa": "...",
+               "rank_ibn_hajar": "...", "rank_dhahabi": "...", "relations": "...",
+               "jarh_wa_tadil": [{ "scholar": "...", "quotes": ["..."] }] }],
+  "total": 1527 }
+```
+
+### Test results (2026-02-23)
+
+| Endpoint | Status | Result |
+|----------|--------|--------|
+| `GET /api/v1/hadiths` | ✅ 200 | `total=7008`, 20 items per page |
+| `GET /api/v1/hadiths?hadith_plain=نام` | ✅ 200 | `total=125` matching hadiths |
+| `GET /api/v1/hadiths/{id}` | ✅ 200 | Full hadith with `chains[]` and `unique_narrators[]` |
+| `GET /api/v1/narrators` | ✅ 200 | `total=1523`, 20 items per page |
+| `GET /api/v1/narrators?name_plain=مالك` | ✅ 200 | `total=145` matching narrators |
+| `GET /api/v1/narrators/{id}` | ✅ 200 | Full narrator with `jarh_wa_tadil[]` |
+
+### MongoDB Environment Variables
+
+```bash
+MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+DB_NAME=HadithData
+```
+
+---
+
 ## Troubleshooting
 
 **Auth error:** Check `docker inspect neo4j-hadith` for `NEO4J_AUTH` value — that's the real password.

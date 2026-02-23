@@ -89,9 +89,43 @@ def _process_chain(chain: dict) -> dict:
     }
 
 
+def _dedupe_chains(chains: list[dict]) -> list[dict]:
+    """
+    Remove duplicate chains while preserving order.
+
+    Two chains are considered duplicates if they have the same `type` and the
+    exact same ordered narrators (name/role/narrator_id), regardless of
+    `chain_id`.
+    """
+    seen_signatures = set()
+    unique_chains = []
+
+    for chain in chains:
+        narr_sig = tuple(
+            (n.get("name"), n.get("role"), n.get("narrator_id"))
+            for n in (chain.get("narrators") or [])
+        )
+        signature = (chain.get("type"), narr_sig)
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        unique_chains.append(chain)
+
+    return unique_chains
+
+
+def _resequence_chain_ids(chains: list[dict]) -> list[dict]:
+    """Normalize chain IDs to sequential values after deduplication."""
+    for i, chain in enumerate(chains, start=1):
+        chain["chain_id"] = f"chain_{i}"
+    return chains
+
+
 def process_bukhari_hadith(raw: dict, hadith_tashkeel: str) -> dict:
     matn_segments = raw.get("matn_segments") or []
     chains = [_process_chain(c) for c in (raw.get("chains") or [])]
+    chains = _dedupe_chains(chains)
+    chains = _resequence_chain_ids(chains)
 
     # Build unique narrators list ordered lead-first (reversed sanad order).
     # Collect all narrators from all chains in reversed order so that the lead
