@@ -1,16 +1,33 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .config import settings
+from .database import connect, disconnect
 from .routers import hadiths, narrators
 
-app = FastAPI(title="hadathana-api")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await connect()
+    yield
+    await disconnect()
+
+
+app = FastAPI(title="hadathana-api", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.get_cors_origins(),
     allow_methods=["GET"],
     allow_headers=["*"],
 )
 
 app.include_router(hadiths.router)
 app.include_router(narrators.router)
+
+
+@app.get("/health", tags=["health"])
+async def health():
+    return {"status": "ok"}

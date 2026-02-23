@@ -235,6 +235,9 @@ python mongo_migration/upload.py
 
 # Step 3 — compute narrator statistics (teachers, students, hadith counts)
 python mongo_migration/compute_narrator_stats.py
+
+# Step 4 — create indexes (run once; safe to re-run)
+python mongo_migration/create_indexes.py
 ```
 
 This populates four collections: `bukhari_book`, `narrators`, `hadith_pages`, `narrator_stats`.
@@ -250,6 +253,7 @@ This populates four collections: `bukhari_book`, `narrators`, `hadith_pages`, `n
 | GET | `/api/v1/narrators` | `name_plain`, `kunya`, `nasab`, `skip`, `limit` | `PaginatedNarrators` |
 | GET | `/api/v1/narrators/{id}` | — | `Narrator` |
 | GET | `/api/v1/narrators/{id}/stats` | — | `NarratorStats` |
+| GET | `/health` | — | `{ "status": "ok" }` |
 
 #### Example requests
 
@@ -263,14 +267,17 @@ curl "http://localhost:8000/api/v1/hadiths?hadith_plain=نام"
 # Filter by narrator ID
 curl "http://localhost:8000/api/v1/hadiths?narrator_id=1234"
 
-# Get a single hadith by MongoDB ObjectId
-curl http://localhost:8000/api/v1/hadiths/<ObjectId>
+# Get a single hadith by index
+curl http://localhost:8000/api/v1/hadiths/1
 
 # Search narrators by name
 curl "http://localhost:8000/api/v1/narrators?name_plain=مالك"
 
-# Get a single narrator by MongoDB ObjectId
-curl http://localhost:8000/api/v1/narrators/<ObjectId>
+# Get a single narrator
+curl http://localhost:8000/api/v1/narrators/822
+
+# Get narrator statistics (hadith count, teachers, students)
+curl http://localhost:8000/api/v1/narrators/822/stats
 ```
 
 #### Response shapes
@@ -291,9 +298,15 @@ curl http://localhost:8000/api/v1/narrators/<ObjectId>
                "rank_ibn_hajar": "...", "rank_dhahabi": "...", "relations": "...",
                "jarh_wa_tadil": [{ "scholar": "...", "quotes": ["..."] }] }],
   "total": 1527 }
+
+// NarratorStats
+{ "narrator_id": 822,
+  "hadith_count": 195,
+  "teachers": [{ "narrator_id": 3320, "name": "أبو هريرة", "freq": 38 }],
+  "students": [{ "narrator_id": 857,  "name": "أيوب",      "freq": 47 }] }
 ```
 
-### Test results (2026-02-23)
+### Test results (2026-02-24)
 
 | Endpoint | Status | Result |
 |----------|--------|--------|
@@ -303,12 +316,18 @@ curl http://localhost:8000/api/v1/narrators/<ObjectId>
 | `GET /api/v1/narrators` | ✅ 200 | `total=1523`, 20 items per page |
 | `GET /api/v1/narrators?name_plain=مالك` | ✅ 200 | `total=145` matching narrators |
 | `GET /api/v1/narrators/{id}` | ✅ 200 | Full narrator with `jarh_wa_tadil[]` |
+| `GET /api/v1/narrators/{id}/stats` | ✅ 200 | `hadith_count`, `teachers[]`, `students[]` with frequencies |
 
-### MongoDB Environment Variables
+### Environment Variables
 
 ```bash
 MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
 DB_NAME=HadithData
+
+# Comma-separated list of allowed frontend origins.
+# Default: http://localhost:3000
+# Production example: CORS_ORIGINS=https://hadathana.com,https://www.hadathana.com
+CORS_ORIGINS=http://localhost:3000
 ```
 
 ---

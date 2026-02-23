@@ -1,14 +1,27 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from ..database import get_client, get_db, get_hadiths_collection
-from ..config import settings
 from ..models.hadith import Hadith, PaginatedHadiths
 
 router = APIRouter(prefix="/api/v1/hadiths", tags=["hadiths"])
 
 
+def _normalize_narrator_id(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
+
+
 def _doc_to_hadith(doc: dict) -> Hadith:
     doc["id"] = str(doc.pop("_id"))
+    for n in doc.get("unique_narrators", []):
+        n["narrator_id"] = _normalize_narrator_id(n.get("narrator_id"))
+    for chain in doc.get("chains", []):
+        for n in chain.get("narrators", []):
+            n["narrator_id"] = _normalize_narrator_id(n.get("narrator_id"))
     return Hadith(**doc)
 
 
@@ -24,30 +37,26 @@ async def list_hadiths(
     if hadith_plain:
         query_filter["hadith_plain"] = {"$regex": hadith_plain, "$options": "i"}
     if narrator_id is not None:
-        query_filter["unique_narrators.narrator_id"] = narrator_id
+        query_filter["unique_narrators.narrator_id"] = {"$in": [narrator_id, str(narrator_id)]}
     if chain_type:
         query_filter["chains.type"] = chain_type
 
-    client = get_client()
-    db = get_db(client)
+    db = get_db(get_client())
     collection = get_hadiths_collection(db)
 
     cursor = collection.find(query_filter).skip(skip).limit(limit)
     total = await collection.count_documents(query_filter)
     items = [_doc_to_hadith(doc) async for doc in cursor]
 
-    client.close()
     return PaginatedHadiths(items=items, total=total)
 
 
 @router.get("/{hadith_id}", response_model=Hadith)
 async def get_hadith(hadith_id: int):
-    client = get_client()
-    db = get_db(client)
+    db = get_db(get_client())
     collection = get_hadiths_collection(db)
 
     doc = await collection.find_one({"hadith_index": hadith_id})
-    client.close()
 
     if not doc:
         raise HTTPException(status_code=404, detail="Hadith not found.")

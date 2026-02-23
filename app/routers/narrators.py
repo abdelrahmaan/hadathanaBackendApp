@@ -27,26 +27,22 @@ async def list_narrators(
     if nasab:
         query_filter["nasab"] = {"$regex": nasab, "$options": "i"}
 
-    client = get_client()
-    db = get_db(client)
+    db = get_db(get_client())
     collection = get_narrators_collection(db)
 
     cursor = collection.find(query_filter).skip(skip).limit(limit)
     total = await collection.count_documents(query_filter)
     items = [_doc_to_narrator(doc) async for doc in cursor]
 
-    client.close()
     return PaginatedNarrators(items=items, total=total)
 
 
 @router.get("/{narrator_id}", response_model=Narrator)
 async def get_narrator(narrator_id: int):
-    client = get_client()
-    db = get_db(client)
+    db = get_db(get_client())
     collection = get_narrators_collection(db)
 
     doc = await collection.find_one({"$or": [{"narrator_id": narrator_id}, {"narrator_id": str(narrator_id)}]})
-    client.close()
 
     if not doc:
         raise HTTPException(status_code=404, detail="Narrator not found.")
@@ -56,12 +52,10 @@ async def get_narrator(narrator_id: int):
 
 @router.get("/{narrator_id}/stats", response_model=NarratorStats)
 async def get_narrator_stats(narrator_id: int):
-    client = get_client()
-    db = get_db(client)
+    db = get_db(get_client())
     collection = get_narrator_stats_collection(db)
 
     doc = await collection.find_one({"narrator_id": narrator_id})
-    client.close()
 
     if not doc:
         raise HTTPException(status_code=404, detail="Narrator stats not found.")
