@@ -1,0 +1,5 @@
+- pages_with_no_idx_extracted -> all pages exist
+- missing_hadith_indices -> i can iterae for each hadith index in the website ang check the page number and verifiy it's already here or not here to rescrape it again.
+
+
+when I run @extract_data_v2/firecrawl/shamela_firecrawl.py  it start with pages_to_rescrape_no_narrators and I a done some of it before, so 

@@ -23,6 +23,7 @@ import pathlib
 import re
 import sys
 import time
+from typing import Optional
 
 # ------------------------------------------------------------------
 # Regex helpers
@@ -51,13 +52,32 @@ def strip_hadith_number(text: str) -> str:
     return _HADITH_NUM_RE.sub("", text).strip()
 
 
+_HADITH_IDX_CAPTURE_RE = re.compile(r"^([\u0660-\u0669\u0030-\u0039]+)")
+_ARABIC_TO_INT = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def extract_hadith_number(text: str) -> Optional[int]:
+    """Return the leading hadith number as a Western integer, or None."""
+    if not text:
+        return None
+    m = _HADITH_IDX_CAPTURE_RE.match(text.strip())
+    if not m:
+        return None
+    try:
+        return int(m.group(1).translate(_ARABIC_TO_INT))
+    except ValueError:
+        return None
+
+
 # ------------------------------------------------------------------
 # Record transformations
 # ------------------------------------------------------------------
 
 def _process_block(block: dict) -> dict:
     """Clean a single hadith_block entry."""
-    full_text = strip_hadith_number(block.get("full_text") or "")
+    full_text_raw = block.get("full_text") or ""
+    hadith_number = extract_hadith_number(full_text_raw)
+    full_text = strip_hadith_number(full_text_raw)
     matn = strip_hadith_number(block.get("matn") or "")
 
     narrators = [
@@ -66,6 +86,7 @@ def _process_block(block: dict) -> dict:
     ]
 
     return {
+        "hadith_number": hadith_number,
         "full_text": full_text,
         "full_text_plain": strip_tashkeel(full_text),
         "matn": matn,
@@ -118,7 +139,7 @@ def process_narrator(raw: dict) -> dict:
 # JSONL writer
 # ------------------------------------------------------------------
 
-def process_file(src: pathlib.Path, dest: pathlib.Path, processor):
+def process_file(src: pathlib.Path, dest: pathlib.Path, processor, sort_key=None):
     t0 = time.time()
     kept = skipped = 0
     print(f"\n{'='*60}")
@@ -126,7 +147,8 @@ def process_file(src: pathlib.Path, dest: pathlib.Path, processor):
     print(f"Output : {dest}")
     print(f"{'='*60}")
 
-    with open(src, encoding="utf-8") as fin, open(dest, "w", encoding="utf-8") as fout:
+    records = []
+    with open(src, encoding="utf-8") as fin:
         for lineno, line in enumerate(fin, 1):
             line = line.strip()
             if not line:
@@ -142,8 +164,15 @@ def process_file(src: pathlib.Path, dest: pathlib.Path, processor):
                 skipped += 1
                 continue
 
-            fout.write(json.dumps(processor(raw), ensure_ascii=False) + "\n")
+            records.append(processor(raw))
             kept += 1
+
+    if sort_key:
+        records.sort(key=sort_key)
+
+    with open(dest, "w", encoding="utf-8") as fout:
+        for rec in records:
+            fout.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     elapsed = time.time() - t0
     print(f"  Written  : {kept}")
@@ -159,9 +188,17 @@ _ROOT = pathlib.Path(__file__).parent.parent
 _FIRECRAWL = _ROOT / "extract_data_v2" / "firecrawl"
 _OUT = pathlib.Path(__file__).parent / "processed"
 
+def _hadith_sort_key(r: dict):
+    """Sort hadith pages by first block's hadith_number; None values go last."""
+    blocks = r.get("hadith_blocks")
+    if blocks and blocks[0].get("hadith_number") is not None:
+        return blocks[0]["hadith_number"]
+    return float("inf")
+
+
 SOURCES = [
-    (_FIRECRAWL / "shamela_book_1681.jsonl", _OUT / "hadith_pages.jsonl", process_hadith_page),
-    (_FIRECRAWL / "shamela_narrators.jsonl",  _OUT / "narrators.jsonl",    process_narrator),
+    (_FIRECRAWL / "shamela_book_1681.jsonl", _OUT / "hadith_pages.jsonl", process_hadith_page, _hadith_sort_key),
+    (_FIRECRAWL / "shamela_narrators.jsonl",  _OUT / "narrators.jsonl",    process_narrator,    None),
 ]
 
 
@@ -169,11 +206,11 @@ def main():
     _OUT.mkdir(exist_ok=True)
     print(f"Output directory: {_OUT}")
 
-    for src, dest, processor in SOURCES:
+    for src, dest, processor, sort_key in SOURCES:
         if not src.exists():
             print(f"\n[SKIP] File not found: {src}")
             continue
-        process_file(src, dest, processor)
+        process_file(src, dest, processor, sort_key=sort_key)
 
     print("\nPre-processing complete.")
     print(f"Inspect the files in {_OUT} before running upload.py")

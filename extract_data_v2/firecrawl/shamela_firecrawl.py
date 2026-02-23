@@ -72,6 +72,20 @@ def _is_cloudflare_error_page(html: str) -> bool:
 def norm(text: str) -> str:
     return WS_RE.sub(" ", (text or "")).strip()
 
+def extract_special_num(soup: BeautifulSoup) -> Optional[int]:
+    """
+    Extract the hadith serial number from the page's specialNum input field.
+    Shamela renders: <input id="fld_specialNum_top" value="62" ...>
+    Returns the integer value, or None if not found.
+    """
+    el = soup.find("input", id="fld_specialNum_top")
+    if el:
+        try:
+            return int(el.get("value", "").strip())
+        except (ValueError, AttributeError):
+            pass
+    return None
+
 def extract_breadcrumb(soup: BeautifulSoup) -> list:
     """
     Extract breadcrumb links: list of {text, href}
@@ -161,6 +175,7 @@ def scrape_with_firecrawl(url: str, api_key: str, max_retries: int = 3) -> Scrap
     }
 
     html = ""
+    special_num = None
 
     for attempt in range(max_retries):
         try:
@@ -310,6 +325,7 @@ def scrape_with_firecrawl(url: str, api_key: str, max_retries: int = 3) -> Scrap
 
             # Got hadith blocks — exit retry loop
             breadcrumb_links = extract_breadcrumb(soup)
+            special_num = extract_special_num(soup)
             break
 
         except requests.exceptions.Timeout:
@@ -366,15 +382,16 @@ def scrape_with_firecrawl(url: str, api_key: str, max_retries: int = 3) -> Scrap
         data={
             "url": url,
             "breadcrumb_links": breadcrumb_links,
+            "hadith_number": special_num,
             "hadith_blocks": hadith_blocks,
         },
     )
 
 def load_scraped_pages(jsonl_path: Path) -> set:
     """
-    Load only SUCCESS and NO_NARRATORS page numbers from JSONL file.
-    Failed pages (api_failure, empty_html, no_hadith_blocks) will be retried.
-    no_narrators is a legit skip (page has content but no narrator links).
+    Load only SUCCESS page numbers from JSONL file.
+    All failed pages (including no_narrators) will be retried — some no_narrators
+    results are Cloudflare partial loads misclassified as content-without-narrators.
     """
     scraped = set()
     if not jsonl_path.exists():
@@ -386,36 +403,57 @@ def load_scraped_pages(jsonl_path: Path) -> set:
                 continue
             obj = json.loads(line)
             status = obj.get("status")
-            reason = obj.get("reason", "")
-            if status == "success" or reason == "no_narrators":
+            if status == "success":
                 scraped.add(obj["page_number"])
     return scraped
 
-def get_failed_pages(jsonl_path: Path) -> List[int]:
-    """Get sorted list of failed page numbers that should be retried."""
-    if not jsonl_path.exists():
-        return []
-    failed = set()
-    done = set()
-    with open(jsonl_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            page = obj.get("page_number")
-            status = obj.get("status")
-            reason = obj.get("reason", "")
-            if status == "success" or reason == "no_narrators":
-                done.add(page)
-            elif status == "failed":
-                failed.add(page)
-    return sorted(failed - done)
+def load_tracker(tracker_path: Path) -> Dict[int, dict]:
+    """Load failed_pages_tracker JSON. Keys are int page numbers."""
+    if not tracker_path.exists():
+        return {}
+    with open(tracker_path, encoding="utf-8") as f:
+        raw = json.load(f)
+    return {int(k): v for k, v in raw.items()}
 
-def remove_failed_entries(jsonl_path: Path, pages_to_retry: set):
+def save_tracker(tracker: Dict[int, dict], tracker_path: Path):
+    """Save tracker back to disk (thread-unsafe — call only from main thread)."""
+    with open(tracker_path, "w", encoding="utf-8") as f:
+        json.dump({str(k): v for k, v in tracker.items()}, f, ensure_ascii=False, indent=2)
+
+def get_pages_from_tracker(tracker: Dict[int, dict], max_rerun: int) -> List[int]:
+    """
+    Return pages to scrape this run, sorted by n_rerun ascending (fewest first).
+    - n_rerun=0  → never tried → always included
+    - 0 < n_rerun < max_rerun → retry
+    - n_rerun >= max_rerun → skip (gave up)
+    - reason='api_failure' with HTTP 401 → treated like permanent failure (skip after max_rerun)
+    """
+    retryable = []
+    for page, info in tracker.items():
+        n = info.get("n_rerun", 0)
+        if n < max_rerun:
+            retryable.append((page, n))
+    retryable.sort(key=lambda x: x[1])
+    return [page for page, _ in retryable]
+
+def update_tracker_after_run(tracker: Dict[int, dict], page: int,
+                              success: bool, reason: str = "", message: str = ""):
+    """Update a single page entry in the tracker after a scrape attempt."""
+    if success:
+        # Remove from tracker — page is done
+        tracker.pop(page, None)
+    else:
+        prev = tracker.get(page, {})
+        tracker[page] = {
+            "n_rerun": prev.get("n_rerun", 0) + 1,
+            "reason": reason,
+            "message": message,
+        }
+
+def remove_failed_entries(jsonl_path: Path, pages_to_retry: set) -> Dict[int, int]:
     """Remove old failed entries for pages that will be retried."""
     if not jsonl_path.exists() or not pages_to_retry:
-        return
+        return {}
     kept_lines = []
     removed = 0
     with open(jsonl_path, 'r', encoding='utf-8') as f:
@@ -433,7 +471,7 @@ def remove_failed_entries(jsonl_path: Path, pages_to_retry: set):
         with open(jsonl_path, 'w', encoding='utf-8') as f:
             for line in kept_lines:
                 f.write(line + '\n')
-        print(f"Cleaned {removed} old failed entries for retry")
+        print(f"Cleaned {removed} old failed entries from JSONL")
 
 # Lock for thread-safe file writes and key rotation
 _file_lock = threading.Lock()
@@ -449,7 +487,7 @@ def _scrape_page(book_id: int, page_num: int, api_keys: List[str], key_state: di
                  jsonl_output: Path, debug_dir: Optional[Path]) -> Optional[dict]:
     """
     Scrape a single page. Handles 402 key rotation (thread-safe).
-    Returns result summary dict or None if all keys exhausted.
+    Returns {"success": bool, "reason": str, "message": str} or None if all keys exhausted.
     key_state = {"index": int, "key": str} — mutated in place on rotation.
     """
     url = f"https://shamela.ws/book/{book_id}/{page_num}"
@@ -471,84 +509,68 @@ def _scrape_page(book_id: int, page_num: int, api_keys: List[str], key_state: di
                     print(f"\n  ** API key quota exhausted. Switching to key {key_state['index'] + 1}/{len(api_keys)} **")
                 else:
                     print(f"\n  ** All {len(api_keys)} API keys exhausted! Stopping. **")
-                    obj = {
-                        "status": "failed",
-                        "book_id": book_id,
-                        "page_number": page_num,
-                        "url": url,
-                        "reason": "api_failure",
-                        "message": "All API keys exhausted (402)",
-                    }
-                    append_jsonl(obj, jsonl_output)
+                    msg = "All API keys exhausted (402)"
+                    append_jsonl({"status": "failed", "book_id": book_id,
+                                  "page_number": page_num, "url": url,
+                                  "reason": "api_failure", "message": msg}, jsonl_output)
                     return None  # Signal to stop
 
             # Retry with new key (could be rotated by this thread or another)
             new_key = key_state["key"]
 
         if key_state["index"] >= len(api_keys):
-            obj = {
-                "status": "failed",
-                "book_id": book_id,
-                "page_number": page_num,
-                "url": url,
-                "reason": "api_failure",
-                "message": "All API keys exhausted (402)",
-            }
-            append_jsonl(obj, jsonl_output)
+            msg = "All API keys exhausted (402)"
+            append_jsonl({"status": "failed", "book_id": book_id,
+                          "page_number": page_num, "url": url,
+                          "reason": "api_failure", "message": msg}, jsonl_output)
             return None
 
         result = scrape_with_firecrawl(url, new_key)
 
     if result.success:
-        obj = {
-            "status": "success",
-            "book_id": book_id,
-            "page_number": page_num,
-            **result.data,
-        }
-        append_jsonl(obj, jsonl_output)
-        return {"success": True, "reason": None}
+        append_jsonl({"status": "success", "book_id": book_id,
+                      "page_number": page_num, **result.data}, jsonl_output)
+        return {"success": True, "reason": "", "message": ""}
     else:
-        obj = {
-            "status": "failed",
-            "book_id": book_id,
-            "page_number": page_num,
-            "url": url,
-            "reason": result.reason.value,
-            "message": result.message,
-        }
-        append_jsonl(obj, jsonl_output)
+        append_jsonl({"status": "failed", "book_id": book_id,
+                      "page_number": page_num, "url": url,
+                      "reason": result.reason.value, "message": result.message}, jsonl_output)
 
         if debug_dir and result.raw_html_snippet:
             debug_file = debug_dir / f"page_{page_num}_{result.reason.value}.html"
             with open(debug_file, 'w', encoding='utf-8') as f:
                 f.write(result.raw_html_snippet)
 
-        return {"success": False, "reason": result.reason}
+        return {"success": False, "reason": result.reason.value, "message": result.message}
 
 def _categorize_failure(outcome: dict, api_failures, empty_pages, no_block_pages,
                         no_narrator_pages, page_num: int):
     """Add a failure entry to the appropriate category list."""
-    entry = {"page": page_num, "reason": outcome["reason"].value}
-    if outcome["reason"] == SkipReason.API_FAILURE:
+    reason = outcome["reason"]
+    entry = {"page": page_num, "reason": reason}
+    if reason == SkipReason.API_FAILURE.value:
         api_failures.append(entry)
-    elif outcome["reason"] == SkipReason.EMPTY_HTML:
+    elif reason == SkipReason.EMPTY_HTML.value:
         empty_pages.append(entry)
-    elif outcome["reason"] == SkipReason.NO_HADITH_BLOCKS:
+    elif reason == SkipReason.NO_HADITH_BLOCKS.value:
         no_block_pages.append(entry)
-    elif outcome["reason"] == SkipReason.NO_NARRATORS:
+    elif reason == SkipReason.NO_NARRATORS.value:
         no_narrator_pages.append(entry)
 
 def _process_batch(batch: List[int], book_id: int, api_keys: List[str], key_state: dict,
                    jsonl_output: Path, debug_dir: Optional[Path], max_workers: int,
                    delay: float, label: str, start_idx: int, total: int,
-                   api_failures, empty_pages, no_block_pages, no_narrator_pages, error_pages):
+                   api_failures, empty_pages, no_block_pages, no_narrator_pages, error_pages,
+                   tracker: Optional[Dict[int, dict]] = None):
     """
     Process a list of page numbers using concurrent workers.
     Returns (newly_scraped, keys_exhausted).
+    tracker: the shared failed_pages_tracker dict — updated in place after each result.
     """
     newly_scraped = 0
     keys_exhausted = False
+    if tracker is None:
+        tracker = {}
 
     # Process pages in groups of max_workers
     for batch_start in range(0, len(batch), max_workers):
@@ -559,7 +581,8 @@ def _process_batch(batch: List[int], book_id: int, api_keys: List[str], key_stat
         group_idx = start_idx + batch_start
 
         for p in group:
-            print(f"\n[{label} {group_idx + group.index(p) + 1}/{total}] Page {p}")
+            n = tracker.get(p, {}).get("n_rerun", 0)
+            print(f"\n[{label} {group_idx + group.index(p) + 1}/{total}] Page {p} (n_rerun={n}→{n+1})")
 
         futures = {}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -576,22 +599,23 @@ def _process_batch(batch: List[int], book_id: int, api_keys: List[str], key_stat
                     outcome = future.result()
                     if outcome is None:
                         keys_exhausted = True
+                        update_tracker_after_run(tracker, page_num, False,
+                                                 "api_failure", "All API keys exhausted")
                     elif outcome["success"]:
                         newly_scraped += 1
+                        update_tracker_after_run(tracker, page_num, True)
                     else:
+                        update_tracker_after_run(tracker, page_num, False,
+                                                 outcome["reason"], outcome["message"])
                         _categorize_failure(outcome, api_failures, empty_pages,
                                           no_block_pages, no_narrator_pages, page_num)
                 except Exception as e:
                     print(f"  UNEXPECTED ERROR on page {page_num}: {e}")
-                    obj = {
-                        "status": "failed",
-                        "book_id": book_id,
-                        "page_number": page_num,
-                        "url": f"https://shamela.ws/book/{book_id}/{page_num}",
-                        "reason": "unexpected_error",
-                        "message": str(e),
-                    }
-                    append_jsonl(obj, jsonl_output)
+                    append_jsonl({"status": "failed", "book_id": book_id,
+                                  "page_number": page_num,
+                                  "url": f"https://shamela.ws/book/{book_id}/{page_num}",
+                                  "reason": "unexpected_error", "message": str(e)}, jsonl_output)
+                    update_tracker_after_run(tracker, page_num, False, "unexpected_error", str(e))
                     error_pages.append({"page": page_num, "reason": str(e)})
 
         # Delay between batches (not between individual requests within a batch)
@@ -603,7 +627,8 @@ def _process_batch(batch: List[int], book_id: int, api_keys: List[str], key_stat
 def scrape_book_pages(book_id: int, start_page: int, end_page: int, api_keys: List[str],
                       jsonl_output: Path, delay: float = 1.0,
                       debug_dir: Optional[Path] = None,
-                      max_workers: int = 2) -> int:
+                      max_workers: int = 2,
+                      max_rerun: int = 3) -> int:
     """
     Scrape multiple pages from a Shamela book with concurrent requests.
     1) First retries all previously failed pages (removes old entries, re-scrapes).
@@ -619,6 +644,12 @@ def scrape_book_pages(book_id: int, start_page: int, end_page: int, api_keys: Li
     key_state = {"index": 0, "key": api_keys[0]}
     print(f"Using API key {key_state['index'] + 1}/{len(api_keys)}")
     print(f"Concurrent workers: {max_workers}")
+    print(f"Max reruns per page: {max_rerun}")
+
+    # ── Load tracker ──
+    tracker_path = jsonl_output.parent / f"failed_pages_tracker_{book_id}.json"
+    tracker = load_tracker(tracker_path)
+    print(f"Tracker loaded: {len(tracker)} pages pending")
 
     # Categorized failure tracking
     api_failures = []
@@ -629,43 +660,35 @@ def scrape_book_pages(book_id: int, start_page: int, end_page: int, api_keys: Li
     newly_scraped = 0
     keys_exhausted = False
 
-    # ── Phase 1: Retry previously failed pages ──
-    failed_pages = get_failed_pages(jsonl_output)
-    if failed_pages:
+    # ── Get pages to scrape this run (sorted by n_rerun ascending) ──
+    pages_to_run = get_pages_from_tracker(tracker, max_rerun=max_rerun)
+    skipped = len(tracker) - len(pages_to_run)
+
+    print(f"Pages to scrape this run: {len(pages_to_run)} "
+          f"(skipped {skipped} that reached max_rerun={max_rerun})")
+
+    if pages_to_run:
+        # Remove ALL old failed JSONL entries for every page we're about to scrape
+        remove_failed_entries(jsonl_output, set(pages_to_run))
+
+        n0 = sum(1 for p in pages_to_run if tracker.get(p, {}).get("n_rerun", 0) == 0)
+        n_retry = len(pages_to_run) - n0
         print(f"\n{'='*60}")
-        print(f"PHASE 1: Retrying {len(failed_pages)} failed pages")
+        print(f"Scraping: {n0} new pages + {n_retry} retries (sorted fewest-attempts-first)")
         print(f"{'='*60}")
-        remove_failed_entries(jsonl_output, set(failed_pages))
 
-        phase1_scraped, keys_exhausted = _process_batch(
-            failed_pages, book_id, api_keys, key_state, jsonl_output, debug_dir,
-            max_workers, delay, "Retry", 0, len(failed_pages),
-            api_failures, empty_pages, no_block_pages, no_narrator_pages, error_pages
+        newly_scraped, keys_exhausted = _process_batch(
+            pages_to_run, book_id, api_keys, key_state, jsonl_output, debug_dir,
+            max_workers, delay, "", 0, len(pages_to_run),
+            api_failures, empty_pages, no_block_pages, no_narrator_pages, error_pages,
+            tracker=tracker,
         )
-        newly_scraped += phase1_scraped
+    else:
+        print("\nNothing to scrape — all pages either done or gave up after max_rerun.")
 
-        if phase1_scraped > 0:
-            print(f"\nRetry results: {phase1_scraped} fixed out of {len(failed_pages)}")
-
-    # ── Phase 2: Continue with new pages ──
-    if not keys_exhausted:
-        scraped_pages = load_scraped_pages(jsonl_output)
-        # Build list of pages still to do
-        remaining = [p for p in range(start_page, end_page + 1) if p not in scraped_pages]
-
-        if remaining:
-            print(f"\n{'='*60}")
-            print(f"PHASE 2: Scraping new pages ({len(remaining)} remaining)")
-            print(f"{'='*60}")
-
-            phase2_scraped, keys_exhausted = _process_batch(
-                remaining, book_id, api_keys, key_state, jsonl_output, debug_dir,
-                max_workers, delay, "", 0, len(remaining),
-                api_failures, empty_pages, no_block_pages, no_narrator_pages, error_pages
-            )
-            newly_scraped += phase2_scraped
-        else:
-            print("\nAll pages already scraped!")
+    # ── Save tracker after run ──
+    save_tracker(tracker, tracker_path)
+    print(f"Tracker saved: {len(tracker)} pages still pending")
 
     # Print detailed summary
     print(f"\n{'='*60}")
@@ -728,20 +751,104 @@ def scrape_book_pages(book_id: int, start_page: int, end_page: int, api_keys: Li
 
     return newly_scraped
 
+def _run_phase0_manual_rescrape(report_path: Path, jsonl_output: Path,
+                                 api_keys: List[str], delay: float, max_workers: int):
+    """
+    Phase 0: Read manual_rescrape_pages from the verification report,
+    skip pages already successful in the hadith JSONL, and scrape the rest.
+    Returns the count of newly scraped pages.
+    """
+    if not report_path.exists():
+        print(f"Phase 0: Report not found ({report_path}) — skipping.")
+        return 0
+
+    with open(report_path, encoding="utf-8") as f:
+        report = json.load(f)
+
+    manual_pages: List[int] = report.get("manual_rescrape_pages", [])
+
+    print(f"\n{'='*60}")
+    print(f"PHASE 0: Manual hadith page rescrape")
+    print(f"{'='*60}")
+
+    if not manual_pages:
+        print("  manual_rescrape_pages is empty ✅ — nothing to do.")
+        return 0
+
+    # Find which pages are already success in JSONL
+    success_pages = load_scraped_pages(jsonl_output)
+    to_scrape = [p for p in manual_pages if p not in success_pages]
+
+    print(f"  Total manual pages:    {len(manual_pages)}")
+    print(f"  Already success:       {len(manual_pages) - len(to_scrape)}")
+    print(f"  To scrape this run:    {len(to_scrape)}")
+
+    if not to_scrape:
+        print("  All manual pages already scraped ✅")
+        return 0
+
+    book_id = report.get("book_id", 1681)
+    remove_failed_entries(jsonl_output, set(to_scrape))
+
+    key_state = {"index": 0, "key": api_keys[0]}
+    newly_scraped = 0
+    keys_exhausted = False
+
+    for batch_start in range(0, len(to_scrape), max_workers):
+        if keys_exhausted:
+            break
+
+        group = to_scrape[batch_start:batch_start + max_workers]
+        for p in group:
+            print(f"\n[Phase0 {batch_start + group.index(p) + 1}/{len(to_scrape)}] Page {p}")
+
+        futures = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for page_num in group:
+                future = executor.submit(
+                    _scrape_page, book_id, page_num, api_keys, key_state,
+                    jsonl_output, None
+                )
+                futures[future] = page_num
+
+            for future in as_completed(futures):
+                page_num = futures[future]
+                try:
+                    outcome = future.result()
+                    if outcome is None:
+                        keys_exhausted = True
+                        print(f"  ** All API keys exhausted — stopping Phase 0 **")
+                    elif outcome["success"]:
+                        newly_scraped += 1
+                    else:
+                        print(f"  Page {page_num} failed: {outcome['message']}")
+                except Exception as e:
+                    print(f"  UNEXPECTED ERROR page {page_num}: {e}")
+
+        if not keys_exhausted and batch_start + max_workers < len(to_scrape):
+            time.sleep(delay)
+
+    print(f"\nPhase 0 done: {newly_scraped}/{len(to_scrape)} pages scraped")
+    return newly_scraped
+
+
 if __name__ == "__main__":
+    import subprocess
+    import sys
+
     # Firecrawl API keys (rotates to next on 402 quota exhausted)
     API_KEYS = [
-        "fc-bb3459dabca8414b8c92f647cde7ebf3",
-        "fc-68d7c10c71b74bb5a52d3e7534f28730",
-        "fc-ff5958295ba0497280bc8cc9ca8f5279",
-        "fc-a0e6b09c69d5441293d77c29a403ae85"
-        
+        "fc-9dfc24f3a5314143b9ff520dde949d30",
+        "fc-3586edaed4b4435581f85bbd525a8099",
+        "fc-9c2bdb32b1b24e6db10405e4056238ad",
+        "fc-4bb4e11e032e485b8116279e68cc2142",
+
     ]
 
     # Configuration
     BOOK_ID = 1681
     START_PAGE = 10
-    END_PAGE = 11207
+    END_PAGE = 11208
 
     # Delay between batches (in seconds)
     DELAY_SECONDS = 3.0
@@ -749,17 +856,37 @@ if __name__ == "__main__":
     # Concurrent requests (Firecrawl free tier allows 2)
     MAX_WORKERS = 2
 
+    # Max times to retry a failed page before giving up (per reason, except api_failure)
+    MAX_RERUN = 3
+
     # Debug directory for saving HTML of failed pages (set to None to disable)
     DEBUG_DIR = Path(__file__).parent / f"debug_html_{BOOK_ID}"
 
-    # Output path
+    # Output paths
     jsonl_output = Path(__file__).parent / f"shamela_book_{BOOK_ID}.jsonl"
+    REPORT_FILE  = Path(__file__).parent / f"hadith_verification_report_{BOOK_ID}.json"
+    NARRATOR_SCRAPER = Path(__file__).parent / "shamela_narrator_scraper.py"
 
     print(f"Starting scrape for book {BOOK_ID}, pages {START_PAGE} to {END_PAGE}")
     print(f"Delay between batches: {DELAY_SECONDS}s")
     print(f"Concurrent workers: {MAX_WORKERS}")
     print(f"API keys available: {len(API_KEYS)}")
 
+    # ── Phase 0: Rescrape manually identified hadith pages ──────────────────────
+    try:
+        _run_phase0_manual_rescrape(
+            report_path=REPORT_FILE,
+            jsonl_output=jsonl_output,
+            api_keys=API_KEYS,
+            delay=DELAY_SECONDS,
+            max_workers=MAX_WORKERS,
+        )
+    except KeyboardInterrupt:
+        print("\n\nPhase 0 interrupted by user!")
+        print("Data has been saved up to the last successful page.")
+        sys.exit(0)
+
+    # ── Main scrape ──────────────────────────────────────────────────────────────
     try:
         newly_scraped = scrape_book_pages(
             book_id=BOOK_ID,
@@ -770,6 +897,7 @@ if __name__ == "__main__":
             delay=DELAY_SECONDS,
             debug_dir=DEBUG_DIR,
             max_workers=MAX_WORKERS,
+            max_rerun=MAX_RERUN,
         )
 
         print(f"\nData saved to: {jsonl_output}")
@@ -777,7 +905,23 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nScraping interrupted by user!")
         print("Data has been saved up to the last successful page.")
+        sys.exit(0)
     except Exception as e:
         print(f"Fatal error: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
+
+    # ── Auto-run narrator scraper ────────────────────────────────────────────────
+    if NARRATOR_SCRAPER.exists():
+        print(f"\n{'='*60}")
+        print(f"Launching narrator scraper: {NARRATOR_SCRAPER.name}")
+        print(f"{'='*60}")
+        try:
+            subprocess.run([sys.executable, str(NARRATOR_SCRAPER)], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Narrator scraper exited with error code {e.returncode}")
+        except KeyboardInterrupt:
+            print("\n\nNarrator scraper interrupted by user!")
+    else:
+        print(f"\nNarrator scraper not found at {NARRATOR_SCRAPER} — skipping.")

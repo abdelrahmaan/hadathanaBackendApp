@@ -20,6 +20,32 @@ This directory contains scripts and outputs for scraping Shamela hadith pages an
   - Writes results to `shamela_narrators.jsonl` as `status=success|failed`.
   - Also builds `narrator_hadith_names.json` from hadith data.
 
+- `enrich_narrator_ids.py`
+  - Matches narrator names in `Bukhari_Without_Tashkel_results_advanced_with_matn.json` (no tashkeel) against `narrator_hadith_names.json` (with tashkeel).
+  - Normalizes all File 2 name variants by stripping tashkeel and leading waw connectors, then builds an exact-match lookup.
+  - Injects `narrator_id` into each narrator object in the output copy.
+  - Marks ambiguous names (same stripped form maps to 2+ IDs) with `narrator_id: null, narrator_id_ambiguous: true`.
+  - Prints match statistics and a list of unmatched/ambiguous names for manual review.
+  - Output: `extract_data_v2/Bukhari/Bukhari_Without_Tashkel_results_advanced_with_matn_with_ids.json`.
+
+- `resolve_remaining_narrators.py`
+  - Second-pass resolution for narrators left null by `enrich_narrator_ids.py`.
+  - **Pass 1** — Shamela JSONL cross-reference: strips tashkeel from every narrator name in `shamela_book_1681.jsonl` and builds a richer lookup (4,302 unambiguous forms vs 2,858 in the initial lookup).
+  - **Pass 2** — Context mappings: uses `Bukhari/resolved_context_mappings.json` (1,529 rules) to disambiguate short names like `سفيان` by looking at the next narrator in the chain.
+  - **Pass 3** — Name mapping fallback: applies `narrator_mappings.json` (204 rules) for remaining cases.
+  - Result: 68.2% → 87.8% resolution rate (39,260 / 44,733 narrator mentions).
+  - Updates `Bukhari_Without_Tashkel_results_advanced_with_matn_with_ids.json` in-place.
+
+- `bukhari_narrator_coverage.py`
+  - Builds `bukhari_narrator_coverage.jsonl`: one line per unique narrator ID found in the Bukhari enriched file.
+  - Cross-references each ID against `shamela_narrators.jsonl` to attach full bio (name, kunya, nasab, tabaqa, rank_ibn_hajar, rank_dhahabi, death_date).
+  - Prints a summary: unique IDs, bio coverage, top narrators by mention count.
+  - 1,305 unique narrator IDs found; 1,303 (99.8%) have a bio in Shamela.
+
+- `bukhari_narrator_coverage.jsonl`
+  - Per-narrator coverage report for the Bukhari V2 dataset.
+  - Fields: `narrator_id`, `mention_count`, `resolution_methods`, `bio_status`, bio fields from Shamela.
+
 - `narrators_info_check.py`
   - Coverage + consistency checker between:
     - `shamela_book_1681.jsonl`
@@ -79,6 +105,24 @@ Narrator profiles:
 
 ```bash
 python3 shamela_narrator_scraper.py
+```
+
+Enrich Bukhari hadith chains with narrator IDs (Phase 1 — exact match):
+
+```bash
+python3 enrich_narrator_ids.py
+```
+
+Resolve remaining unmatched/ambiguous narrators using Shamela + context rules (Phase 2):
+
+```bash
+python3 resolve_remaining_narrators.py
+```
+
+Check Bukhari narrator coverage and generate per-narrator bio report:
+
+```bash
+python3 bukhari_narrator_coverage.py
 ```
 
 Coverage and gap handling:

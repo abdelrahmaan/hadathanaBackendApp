@@ -78,12 +78,16 @@ This directory contains the V2 pipeline for hadith chain extraction with **conte
 |------|-------------|
 | `Bukhari_Without_Tashkel.json` | Raw input (7,563 hadiths) |
 | `Bukhari_Without_Tashkel_results_advanced_with_matn.json` | Extracted chains (Step 1 output) |
+| `Bukhari_Without_Tashkel_results_advanced_with_matn_with_ids.json` | Chains enriched with narrator IDs (7,008 hadiths, 93.99% coverage) |
 | `ambiguous_narrators_for_llm.csv` | 1,555 ambiguous name-student pairs |
 | `resolved_context_mappings.json` | 1,529 pre-computed context resolutions (98.3%) |
 | `remaining_ambiguous_pairs.json` | 186 still-ambiguous pairs with candidates and difficulty |
 | `Bukhari_Normalized_Ready_For_Graph.json` | Final normalized output with IDs |
 | `narrators_nodes.csv` | Unique narrator nodes for Neo4j LOAD CSV |
 | `unmapped_narrators_report.csv` | Unmapped narrator analysis |
+| `narrator_hadith_names_bukhari.json` | narrator_id → list of name forms seen in Bukhari chains (1,366 IDs, no-tashkeel) |
+| `covered_narrators.csv` | 1,366 resolved narrators — ID, canonical Shamela name, name variants, role, resolution method, sample hadith indices |
+| `uncovered_narrators.csv` | 699 unresolved narrator names — name, role, total occurrences, sample hadith indices |
 
 ### Documentation
 
@@ -292,4 +296,4 @@ Expected. Remaining unmapped names are either:
 
 ---
 
-**Last Updated:** 2026-02-10
+**Last Updated:** 2026-02-22

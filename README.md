@@ -164,8 +164,17 @@ hadith_graph/
 │   ├── firecrawl/
 │   │   ├── shamela_book_1681.jsonl     # 7,230 hadiths (raw scrape)
 │   │   ├── shamela_narrators.jsonl     # 1,527 narrator biographies
-│   │   └── narrator_hadith_names.json  # 1,525 narrator → name variants
-│   └── Bukhari/                        # V2 LLM-extracted data (legacy)
+│   │   ├── narrator_hadith_names.json       # 1,525 narrator → name variants
+│   │   ├── enrich_narrator_ids.py          # Phase 1: exact name match → narrator IDs (68% coverage)
+│   │   ├── resolve_remaining_narrators.py  # Phase 2: Shamela + context rules → 88% coverage
+│   │   ├── bukhari_narrator_coverage.py    # generates per-narrator bio report for Bukhari V2
+│   │   └── bukhari_narrator_coverage.jsonl # output: 1,305 narrators with bio fields
+│   ├── Bukhari/
+│   │   ├── Bukhari_Without_Tashkel_results_advanced_with_matn.json        # V2 LLM-extracted hadith chains (no tashkeel)
+│   │   ├── Bukhari_Without_Tashkel_results_advanced_with_matn_with_ids.json  # ← enriched with narrator IDs
+│   │   ├── narrator_hadith_names_bukhari.json  # narrator_id → name variants seen in Bukhari chains (1,366 IDs)
+│   │   ├── covered_narrators.csv               # 1,366 resolved narrators: ID, canonical name, name forms, role, method, sample hadith indices
+│   │   └── uncovered_narrators.csv             # 699 unresolved narrator names: name, role, occurrences, sample hadith indices
 │
 ├── backend/
 │   └── main.py                         # FastAPI server
