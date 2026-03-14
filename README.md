@@ -114,7 +114,25 @@ RETURN n.name, count(*) AS freq ORDER BY freq DESC LIMIT 10;
 
 ---
 
-## Docker Setup
+## Docker
+
+### Run the API locally with Docker
+
+```bash
+# Build the image
+docker build -t hadathna-api .
+
+# Run (pass env vars at runtime, never bake them into the image)
+docker run -p 8000:8000 \
+  -e MONGODB_URI="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/" \
+  -e DB_NAME="HadithData" \
+  -e CORS_ORIGINS="*" \
+  hadathna-api
+```
+
+API available at http://localhost:8000 — health check: http://localhost:8000/health
+
+### Neo4j container (legacy graph pipeline only)
 
 ```bash
 # Create container (first time)
@@ -222,6 +240,19 @@ uvicorn app.main:app --reload
 
 API docs: http://localhost:8000/docs
 
+### Deploy to Railway / Render
+
+1. Push the repo to GitHub
+2. Create a new project on [Railway](https://railway.app) or [Render](https://render.com) and connect the repo
+3. Set environment variables in the platform dashboard:
+   ```
+   MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+   DB_NAME=HadithData
+   CORS_ORIGINS=*
+   ```
+4. In MongoDB Atlas → **Network Access** → allow `0.0.0.0/0` (or the platform's IP range)
+5. The platform will auto-detect the `Dockerfile` and deploy
+
 ### Populate the database
 
 Before the API returns data, run the migration pipeline:
@@ -324,10 +355,10 @@ curl http://localhost:8000/api/v1/narrators/822/stats
 MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
 DB_NAME=HadithData
 
-# Comma-separated list of allowed frontend origins.
-# Default: http://localhost:3000
-# Production example: CORS_ORIGINS=https://hadathana.com,https://www.hadathana.com
-CORS_ORIGINS=http://localhost:3000
+# Use * to allow all origins (public API).
+# For restricted access, use comma-separated list:
+# CORS_ORIGINS=https://hadathana.com,https://www.hadathana.com
+CORS_ORIGINS=*
 ```
 
 ---

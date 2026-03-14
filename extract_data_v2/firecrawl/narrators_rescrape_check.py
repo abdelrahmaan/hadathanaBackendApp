@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import time
+import threading
 from collections import Counter
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict, List, Optional, Set
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 START_PAGE = 10
 END_PAGE = 11207
 
 API_KEYS = [
-    "fc-bb3459dabca8414b8c92f647cde7ebf3",
-    "fc-68d7c10c71b74bb5a52d3e7534f28730",
-    "fc-ff5958295ba0497280bc8cc9ca8f5279",
-    "fc-a0e6b09c69d5441293d77c29a403ae85",
-    "fc-276067bd3ea54fc9b1a944944f5bdc76",
+    "fc-04554043bf914e728a96ba5cd7902d60",
+    "fc-220712d1992f448795f850342e05d1bd",
 ]
 
+BOOK_ID = 1681
 BASE_DIR = Path(__file__).resolve().parent
+MISSING_INDEX_FILE = BASE_DIR / "missing_hadith_index.json"
 
 
 def sort_ids(values: Set[str]) -> list[str]:
@@ -134,6 +136,11 @@ def main() -> None:
         action="store_true",
         help="Rescrape narrator IDs that are failed/not-scraped using API_KEYS in this file.",
     )
+    parser.add_argument(
+        "--rescrape-hadith",
+        action="store_true",
+        help="Rescrape missing hadith pages from missing_hadith_index.json into shamela_book_1681.jsonl.",
+    )
     parser.add_argument("--max-workers", type=int, default=2)
     parser.add_argument("--delay", type=float, default=3.0)
 
@@ -213,6 +220,171 @@ def main() -> None:
             delay=args.delay,
             max_workers=args.max_workers,
         )
+
+    if args.rescrape_hadith:
+        rescrape_missing_hadith_pages(
+            book_jsonl=args.book_jsonl,
+            api_keys=API_KEYS,
+            max_workers=args.max_workers,
+            delay=args.delay,
+        )
+
+
+# ── Hadith rescrape logic ────────────────────────────────────────────────────
+
+_key_lock = threading.Lock()
+
+
+def _scrape_single_page(
+    book_id: int,
+    page_num: int,
+    api_keys: List[str],
+    key_state: dict,
+    jsonl_path: Path,
+    debug_dir: Optional[Path],
+):
+    """Scrape one page with API key rotation on 402. Returns outcome dict or None."""
+    from shamela_firecrawl import scrape_with_firecrawl, append_jsonl
+
+    url = f"https://shamela.ws/book/{book_id}/{page_num}"
+
+    with _key_lock:
+        current_key = key_state["key"]
+
+    result = scrape_with_firecrawl(url, current_key)
+
+    # 402 quota exhausted → rotate key and retry once
+    if not result.success and "402" in result.message:
+        with _key_lock:
+            if key_state["key"] == current_key:
+                key_state["index"] += 1
+                if key_state["index"] < len(api_keys):
+                    key_state["key"] = api_keys[key_state["index"]]
+                    print(f"\n  ** API key exhausted. Switching to key "
+                          f"{key_state['index'] + 1}/{len(api_keys)} **")
+                else:
+                    print(f"\n  ** All {len(api_keys)} API keys exhausted! **")
+                    append_jsonl({"status": "failed", "book_id": book_id,
+                                  "page_number": page_num, "url": url,
+                                  "reason": "api_failure",
+                                  "message": "All API keys exhausted (402)"}, jsonl_path)
+                    return None
+
+            new_key = key_state["key"]
+
+        if key_state["index"] >= len(api_keys):
+            append_jsonl({"status": "failed", "book_id": book_id,
+                          "page_number": page_num, "url": url,
+                          "reason": "api_failure",
+                          "message": "All API keys exhausted (402)"}, jsonl_path)
+            return None
+
+        result = scrape_with_firecrawl(url, new_key)
+
+    if result.success:
+        append_jsonl({"status": "success", "book_id": book_id,
+                      "page_number": page_num, **result.data}, jsonl_path)
+        return {"success": True, "reason": None}
+    else:
+        append_jsonl({"status": "failed", "book_id": book_id,
+                      "page_number": page_num, "url": url,
+                      "reason": result.reason.value,
+                      "message": result.message}, jsonl_path)
+        if debug_dir and result.raw_html_snippet:
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            (debug_dir / f"page_{page_num}_{result.reason.value}.html").write_text(
+                result.raw_html_snippet, encoding="utf-8")
+        return {"success": False, "reason": result.reason.value}
+
+
+def rescrape_missing_hadith_pages(
+    book_jsonl: Path,
+    api_keys: List[str],
+    max_workers: int = 2,
+    delay: float = 3.0,
+):
+    """Load missing_hadith_index.json and rescrape candidate pages."""
+    from shamela_firecrawl import load_scraped_pages, remove_failed_entries
+
+    if not MISSING_INDEX_FILE.exists():
+        print(f"\n{MISSING_INDEX_FILE.name} not found. Run list_missing_hadith_index.py first.")
+        return
+
+    with open(MISSING_INDEX_FILE, encoding="utf-8") as f:
+        report = json.load(f)
+
+    pages_to_scrape: List[int] = report.get("pages_to_scrape", [])
+    if not pages_to_scrape:
+        print("\nNo pages to scrape in missing_hadith_index.json.")
+        return
+
+    # Filter out already-successful pages
+    success_pages = load_scraped_pages(book_jsonl)
+    pages_to_scrape = [p for p in pages_to_scrape if p not in success_pages]
+
+    if not pages_to_scrape:
+        print("\nAll candidate pages already scraped successfully.")
+        return
+
+    # Remove old failed entries for pages we'll retry
+    remove_failed_entries(book_jsonl, set(pages_to_scrape))
+
+    debug_dir = BASE_DIR / f"debug_html_{BOOK_ID}_missing"
+    key_state = {"index": 0, "key": api_keys[0]}
+
+    print(f"\n{'='*60}")
+    print(f"HADITH RESCRAPE: {len(pages_to_scrape)} pages")
+    print(f"Using API key 1/{len(api_keys)}, workers={max_workers}, delay={delay}s")
+    print(f"Output: {book_jsonl}")
+    print(f"{'='*60}")
+
+    succeeded = 0
+    failed = 0
+    keys_exhausted = False
+    total = len(pages_to_scrape)
+
+    for batch_start in range(0, total, max_workers):
+        if keys_exhausted:
+            break
+
+        group = pages_to_scrape[batch_start:batch_start + max_workers]
+        for p in group:
+            print(f"\n[{batch_start + group.index(p) + 1}/{total}] Page {p}")
+
+        futures = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for page_num in group:
+                future = executor.submit(
+                    _scrape_single_page, BOOK_ID, page_num, api_keys,
+                    key_state, book_jsonl, debug_dir,
+                )
+                futures[future] = page_num
+
+            for future in as_completed(futures):
+                page_num = futures[future]
+                try:
+                    outcome = future.result()
+                    if outcome is None:
+                        keys_exhausted = True
+                    elif outcome["success"]:
+                        succeeded += 1
+                    else:
+                        failed += 1
+                except Exception as e:
+                    print(f"  UNEXPECTED ERROR on page {page_num}: {e}")
+                    failed += 1
+
+        if not keys_exhausted and batch_start + max_workers < total:
+            time.sleep(delay)
+
+    print(f"\n{'='*60}")
+    print(f"HADITH RESCRAPE DONE")
+    print(f"  Pages attempted : {total}")
+    print(f"  Succeeded       : {succeeded}")
+    print(f"  Failed          : {failed}")
+    if keys_exhausted:
+        print("  Stopped early: all API keys exhausted")
+    print(f"{'='*60}")
 
 
 if __name__ == "__main__":

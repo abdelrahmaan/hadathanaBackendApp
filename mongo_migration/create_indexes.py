@@ -16,9 +16,9 @@ from pymongo import MongoClient, ASCENDING, TEXT
 
 load_dotenv()
 
-MONGODB_URI = os.environ.get("MONGODB_URI")
+MONGODB_URI = os.environ.get("MONGODB_URI_READ_WRITE") or os.environ.get("MONGODB_URI")
 if not MONGODB_URI:
-    sys.exit("ERROR: MONGODB_URI not found in environment / .env file")
+    sys.exit("ERROR: MONGODB_URI_READ_WRITE (or MONGODB_URI) not found in environment / .env file")
 
 DB_NAME = os.environ.get("DB_NAME", "HadithData")
 
@@ -44,6 +44,31 @@ INDEXES = {
         # Primary lookup (GET /narrators/{id}/stats) — already created by
         # compute_narrator_stats.py but listed here for completeness.
         ([("narrator_id", ASCENDING)], {"unique": True}),
+    ],
+    # --- Podia collections ---
+    "bukhari_book_podia": [
+        # Query by any hadith index in the array
+        ([("hadith_indices", ASCENDING)], {}),
+        # Query by narrator rawi_id
+        ([("narrators.rawi_id", ASCENDING)], {}),
+        # URL-based unique lookup (upsert key)
+        ([("hadith_url", ASCENDING)], {"unique": True}),
+        # Book browse
+        ([("book", ASCENDING)], {}),
+    ],
+    "narrators_podia": [
+        # Primary lookup (GET /podia/narrators/{rawi_id})
+        ([("rawi_id", ASCENDING)], {"unique": True}),
+        # Name search
+        ([("full_name_plain", ASCENDING)], {}),
+        ([("name_in_chain_plain", ASCENDING)], {}),
+    ],
+    "narrator_stats_podia": [
+        ([("rawi_id", ASCENDING)], {"unique": True}),
+    ],
+    "narrators_tarajem_podia": [
+        ([("rawi_id", ASCENDING)], {"unique": True}),
+        ([("full_name_plain", ASCENDING)], {}),
     ],
 }
 

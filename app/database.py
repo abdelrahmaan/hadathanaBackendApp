@@ -28,9 +28,25 @@ def get_narrator_stats_collection(db):
     return db["narrator_stats"]
 
 
+def get_podia_hadiths_collection(db):
+    return db["bukhari_book_podia"]
+
+
+def get_podia_narrators_collection(db):
+    return db["narrators_podia"]
+
+
+def get_podia_narrator_stats_collection(db):
+    return db["narrator_stats_podia"]
+
+
+def get_podia_narrators_tarajem_collection(db):
+    return db["narrators_tarajem_podia"]
+
+
 async def connect():
     global _client
-    _client = AsyncIOMotorClient(settings.mongodb_uri)
+    _client = AsyncIOMotorClient(settings.mongodb_uri_read)
 
 
 async def disconnect():

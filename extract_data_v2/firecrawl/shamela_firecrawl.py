@@ -30,6 +30,7 @@ class ScrapeResult:
 
 NARRATOR_RE = re.compile(r"/narrator/(\d+)")
 WS_RE = re.compile(r"\s+")
+HADITH_IDX_RE = re.compile(r"^[٠-٩\d]+\s*[-–—]")
 
 RETRYABLE_FIRECRAWL_HTTP_CODES = {"408", "409", "425", "429", "500", "502", "503", "504"}
 RETRYABLE_TARGET_CODES = {
@@ -149,12 +150,20 @@ def extract_hadith_and_narrators(soup: BeautifulSoup) -> list:
 
     return results
 
-def has_narrator_data(hadith_blocks: list) -> bool:
-    """Check if at least one hadith block has narrators."""
-    for block in hadith_blocks:
-        if block.get("narrators") and len(block["narrators"]) > 0:
-            return True
-    return False
+def _has_hadith_index(full_text: str) -> bool:
+    """Check if the text contains a hadith index like '٤١ -' within the first 200 chars."""
+    return bool(HADITH_IDX_RE.search(full_text.strip()[:200]))
+
+
+def filter_hadith_blocks(hadith_blocks: list) -> list:
+    """
+    Keep only blocks that are actual hadiths (have narrators or a hadith index prefix).
+    Blocks without either are chapter headers (e.g. 'بَابٌ: أَحَبُّ الدِّينِ').
+    """
+    return [
+        b for b in hadith_blocks
+        if b.get("narrators") or _has_hadith_index(b.get("full_text", ""))
+    ]
 
 def scrape_with_firecrawl(url: str, api_key: str, max_retries: int = 3) -> ScrapeResult:
     """
@@ -275,6 +284,8 @@ def scrape_with_firecrawl(url: str, api_key: str, max_retries: int = 3) -> Scrap
             # Parse and check if page content actually loaded
             soup = BeautifulSoup(html, "html.parser")
             hadith_blocks = extract_hadith_and_narrators(soup)
+            # Filter out chapter headers (blocks with no index and no narrators)
+            hadith_blocks = filter_hadith_blocks(hadith_blocks)
 
             if not hadith_blocks:
                 # Page likely didn't finish loading — retry
@@ -361,21 +372,12 @@ def scrape_with_firecrawl(url: str, api_key: str, max_retries: int = 3) -> Scrap
             message=f"Failed after {max_retries} attempts",
         )
 
-    # Blocks found but no narrators
-    if not has_narrator_data(hadith_blocks):
-        sample_text = hadith_blocks[0].get("full_text", "")[:100] if hadith_blocks else ""
-        msg = f"{len(hadith_blocks)} hadith blocks but no narrator links"
-        print(f"  {msg}. Sample: {sample_text}...")
-        return ScrapeResult(
-            success=False,
-            reason=SkipReason.NO_NARRATORS,
-            message=msg,
-            raw_html_snippet=html[:500],
-        )
-
-    # Success
+    # Blocks found but no narrators — still valid hadith data
     narrator_count = sum(len(b.get("narrators", [])) for b in hadith_blocks)
-    print(f"  OK: {len(hadith_blocks)} hadith blocks, {narrator_count} narrators")
+    if narrator_count == 0:
+        print(f"  OK (no narrator links): {len(hadith_blocks)} hadith blocks")
+    else:
+        print(f"  OK: {len(hadith_blocks)} hadith blocks, {narrator_count} narrators")
 
     return ScrapeResult(
         success=True,
@@ -838,11 +840,8 @@ if __name__ == "__main__":
 
     # Firecrawl API keys (rotates to next on 402 quota exhausted)
     API_KEYS = [
-        "fc-9dfc24f3a5314143b9ff520dde949d30",
-        "fc-3586edaed4b4435581f85bbd525a8099",
-        "fc-9c2bdb32b1b24e6db10405e4056238ad",
-        "fc-4bb4e11e032e485b8116279e68cc2142",
-
+        "- fc-04554043bf914e728a96ba5cd7902d60",
+        "- fc-220712d1992f448795f850342e05d1bd"
     ]
 
     # Configuration

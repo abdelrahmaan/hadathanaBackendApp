@@ -4,10 +4,15 @@ Upload pre-processed JSONL data to MongoDB Atlas.
 Run pre_processing.py FIRST to generate the files in processed/.
 Then run this script to upload them.
 
-Collections:
-  hadith_pages  ← mongo_migration/processed/hadith_pages.jsonl
-  narrators     ← mongo_migration/processed/narrators.jsonl
-  bukhari_book  ← mongo_migration/processed/preprocessed_bukhari.jsonl
+Collections (Shamela):
+  hadith_pages      ← processed_bukhari_shamela/hadith_pages.jsonl
+  narrators         ← processed_bukhari_shamela/narrators.jsonl
+  bukhari_book      ← processed_bukhari_shamela/preprocessed_bukhari.jsonl
+
+Collections (Podia):
+  bukhari_book_podia      ← processed_bukhari_podia/bukhari_podia_hadiths.jsonl
+  narrators_podia         ← processed_bukhari_podia/bukhari_podia_narrators.jsonl
+  narrators_tarajem_podia ← processed_bukhari_podia/narrators_tarajem.jsonl
 
 Usage:
     python mongo_migration/upload.py
@@ -29,21 +34,27 @@ from pymongo.errors import BulkWriteError
 
 load_dotenv()
 
-MONGODB_URI = os.environ.get("MONGODB_URI")
+MONGODB_URI = os.environ.get("MONGODB_URI_READ_WRITE") or os.environ.get("MONGODB_URI")
 if not MONGODB_URI:
-    sys.exit("ERROR: MONGODB_URI not found in environment / .env file")
+    sys.exit("ERROR: MONGODB_URI_READ_WRITE (or MONGODB_URI) not found in environment / .env file")
 
 DB_NAME = os.environ.get("DB_NAME", "HadithData")
 BATCH_SIZE = 500
 
-_PROCESSED = pathlib.Path(__file__).parent / "processed"
+_PROCESSED_SHAMELA = pathlib.Path(__file__).parent / "processed_bukhari_shamela"
+_PROCESSED_PODIA   = pathlib.Path(__file__).parent / "processed_bukhari_podia"
 
 # (jsonl_path, collection_name, upsert_key_fields)
 # upsert_key_fields: tuple of doc fields used to identify an existing document.
 SOURCES = [
-    (_PROCESSED / "hadith_pages.jsonl",         "hadith_pages",  ("book_id", "page_number")),
-    (_PROCESSED / "narrators.jsonl",             "narrators",     ("narrator_id",)),
-    (_PROCESSED / "preprocessed_bukhari.jsonl",  "bukhari_book",  ("source", "hadith_index")),
+    # Shamela sources
+    (_PROCESSED_SHAMELA / "hadith_pages.jsonl",         "hadith_pages",  ("book_id", "page_number")),
+    (_PROCESSED_SHAMELA / "narrators.jsonl",             "narrators",     ("narrator_id",)),
+    (_PROCESSED_SHAMELA / "preprocessed_bukhari.jsonl",  "bukhari_book",  ("source", "hadith_index")),
+    # Podia sources
+    (_PROCESSED_PODIA / "bukhari_podia_hadiths.jsonl",   "bukhari_book_podia", ("hadith_url",)),
+    (_PROCESSED_PODIA / "bukhari_podia_narrators.jsonl", "narrators_podia",    ("rawi_id",)),
+    (_PROCESSED_PODIA / "narrators_tarajem.jsonl",       "narrators_tarajem_podia", ("rawi_id",)),
 ]
 
 

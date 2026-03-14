@@ -46,6 +46,14 @@ This directory contains scripts and outputs for scraping Shamela hadith pages an
   - Per-narrator coverage report for the Bukhari V2 dataset.
   - Fields: `narrator_id`, `mention_count`, `resolution_methods`, `bio_status`, bio fields from Shamela.
 
+- `list_missing_hadith_index.py`
+  - Parses all hadith blocks from `shamela_book_1681.jsonl` and extracts their numeric indices.
+  - Handles multi-index hadiths (e.g., `٤٠٨ - ٤٠٩ - حَدَّثَنَا`) by capturing all leading Arabic-Indic digit groups.
+  - Detects gaps in the index sequence and generates predicted URLs for missing hadiths.
+  - Output: `missing_hadith_index.json` with `range`, `total_found`, `total_missing`, and a full `hadiths` list.
+  - Each entry has `hadith_index` and `missing` flag; found hadiths include `hadith_url`, missing ones include `missing_hadith_url`.
+  - Run: 1–7563 range, 7279 found, 284 missing.
+
 - `narrators_info_check.py`
   - Coverage + consistency checker between:
     - `shamela_book_1681.jsonl`
