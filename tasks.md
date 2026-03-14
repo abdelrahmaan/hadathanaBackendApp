@@ -1,5 +1,7 @@
 # Hadathna - Project Tasks
 
+> **For Claude**: Before starting any task, mark the relevant item as `in_progress`. After finishing, update status, add a summary, and list touched files. Both updates are mandatory — see CLAUDE.md Workflow Rules.
+
 ---
 
 ## v0.1 - Data Acquisition & Scraping (DONE)
@@ -66,9 +68,10 @@
 
 ### MongoDB Upload
 - [x] Batch upsert (500 docs/batch) to 6+ collections
-- [x] Shamela collections: `bukhari_book`, `narrators`, `hadith_pages`, `narrator_stats`
-- [x] Podia collections: `bukhari_book_podia`, `narrators_podia`, `narrators_tarajem_podia`, `narrator_stats_podia`
+- [x] Shamela collections: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats`
+- [x] Podia collections: `raw_podia_books`, `raw_podia_narrators`, `raw_podia_narrator_biographies`, `analytics_narrator_stats_podia`
 - [x] Index creation for optimized queries (unique, text, compound indexes)
+- [x] Renamed all collections to new schema (prefixed by source: `raw_shamela_*`, `raw_podia_*`, `analytics_*`)
 
 ---
 
@@ -208,3 +211,19 @@
 
 **Current version**: v0.5 (all foundational work complete)
 **Next milestone**: v1.0 (boost narrator coverage to ~95%)
+
+---
+
+## Chore Log
+
+### MongoDB Collection Rename (2026-03-15)
+**Status**: Done
+**Summary**: Renamed all 8 MongoDB collections to a structured naming schema with source prefixes.
+**Touched files**:
+- `mongo_migration/rename_collections.py` (new — one-time Atlas migration script)
+- `app/database.py`
+- `mongo_migration/upload.py`
+- `mongo_migration/create_indexes.py`
+- `mongo_migration/processed_bukhari_shamela/compute_stats.py`
+- `mongo_migration/processed_bukhari_podia/compute_stats.py`
+- `CLAUDE.md`

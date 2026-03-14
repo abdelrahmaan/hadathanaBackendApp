@@ -4,13 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Workflow Rules
 
-Follow these rules strictly for every task:
+Follow these rules strictly for **every task, no exceptions**:
 
-### Task Tracking
-1. Read `tasks.md` first to understand project context and current progress
-2. Mark the relevant task item as `in_progress` before starting work
-3. Implement the requested change
-4. Update `tasks.md` after finishing — include summary, status, and touched files
+### Task Tracking — MANDATORY steps in order
+1. **Read `tasks.md`** first to understand project context and current progress
+2. **Mark the relevant item as `in_progress`** in `tasks.md` before starting any work
+3. **Implement** the requested change
+4. **Update `tasks.md`** immediately after finishing — the update MUST include:
+   - Status changed to done/completed
+   - A short summary of what was done
+   - List of all touched files
+
+> **Both steps 2 and 4 are non-negotiable.** Never finish a task without updating `tasks.md`.
+> If the task doesn't map to an existing item, add a new entry under the relevant version or the Chore Log section.
 
 ### Conventions
 - **Commit messages**: Use conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`)
@@ -41,14 +47,24 @@ collection = get_hadiths_collection(db)
 ```
 
 **MongoDB collections**:
-- `bukhari_book` - Shamela hadiths
-- `narrators` - Shamela narrators
-- `hadith_pages` - Raw Shamela pages
-- `narrator_stats` - Computed statistics (teachers/students)
-- `bukhari_book_podia` - Podia hadiths
-- `narrators_podia` - Podia narrators
-- `narrators_tarajem_podia` - Narrator biographies
-- `narrator_stats_podia` - Podia statistics
+
+Shamela pipeline:
+- `raw_shamela_books` - Shamela hadiths
+- `raw_shamela_narrators` - Shamela narrators
+- `raw_shamela_hadith_pages` - Raw Shamela pages
+
+Podia pipeline:
+- `raw_podia_books` - Podia hadiths
+- `raw_podia_narrators` - Podia narrators
+- `raw_podia_narrator_biographies` - Narrator biographies (tarajem)
+
+Analytics:
+- `analytics_narrator_stats` - Shamela teacher/student statistics
+- `analytics_narrator_stats_podia` - Podia teacher/student statistics
+
+Future (not yet populated):
+- `canonical_books`, `canonical_hadiths`, `canonical_narrators`, `canonical_chains` (v1.2+)
+- `raw_shamela_narrator_biographies`, `analytics_chain_stats`, `analytics_source_coverage` (v1.1+)
 
 ### Data Pipeline Architecture
 
