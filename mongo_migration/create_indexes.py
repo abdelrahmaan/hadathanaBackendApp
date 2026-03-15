@@ -23,7 +23,7 @@ if not MONGODB_URI:
 DB_NAME = os.environ.get("DB_NAME", "HadithData")
 
 INDEXES = {
-    "bukhari_book": [
+    "raw_shamela_books": [
         # Narrator ID filter (GET /hadiths?narrator_id=...)
         ([("unique_narrators.narrator_id", ASCENDING)], {}),
         # Chain type filter (GET /hadiths?chain_type=...)
@@ -31,7 +31,7 @@ INDEXES = {
         # Hadith index lookup (GET /hadiths/{id})
         ([("hadith_index", ASCENDING)], {"unique": True}),
     ],
-    "narrators": [
+    "raw_shamela_narrators": [
         # Narrator ID lookup (GET /narrators/{narrator_id})
         ([("narrator_id", ASCENDING)], {"unique": True}),
         # Name search (GET /narrators?name_plain=...)
@@ -40,13 +40,13 @@ INDEXES = {
         ([("kunya", ASCENDING)], {}),
         ([("nasab", ASCENDING)], {}),
     ],
-    "narrator_stats": [
+    "analytics_narrator_stats_shamela": [
         # Primary lookup (GET /narrators/{id}/stats) — already created by
         # compute_narrator_stats.py but listed here for completeness.
         ([("narrator_id", ASCENDING)], {"unique": True}),
     ],
     # --- Podia collections ---
-    "bukhari_book_podia": [
+    "raw_podia_books": [
         # Query by any hadith index in the array
         ([("hadith_indices", ASCENDING)], {}),
         # Query by narrator rawi_id
@@ -56,17 +56,17 @@ INDEXES = {
         # Book browse
         ([("book", ASCENDING)], {}),
     ],
-    "narrators_podia": [
+    "raw_podia_narrators": [
         # Primary lookup (GET /podia/narrators/{rawi_id})
         ([("rawi_id", ASCENDING)], {"unique": True}),
         # Name search
         ([("full_name_plain", ASCENDING)], {}),
         ([("name_in_chain_plain", ASCENDING)], {}),
     ],
-    "narrator_stats_podia": [
+    "analytics_narrator_stats_podia": [
         ([("rawi_id", ASCENDING)], {"unique": True}),
     ],
-    "narrators_tarajem_podia": [
+    "raw_podia_narrator_biographies": [
         ([("rawi_id", ASCENDING)], {"unique": True}),
         ([("full_name_plain", ASCENDING)], {}),
     ],

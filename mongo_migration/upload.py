@@ -5,14 +5,14 @@ Run pre_processing.py FIRST to generate the files in processed/.
 Then run this script to upload them.
 
 Collections (Shamela):
-  hadith_pages      ← processed_bukhari_shamela/hadith_pages.jsonl
-  narrators         ← processed_bukhari_shamela/narrators.jsonl
-  bukhari_book      ← processed_bukhari_shamela/preprocessed_bukhari.jsonl
+  raw_shamela_hadith_pages ← processed_bukhari_shamela/hadith_pages.jsonl
+  raw_shamela_narrators    ← processed_bukhari_shamela/narrators.jsonl
+  raw_shamela_books        ← processed_bukhari_shamela/preprocessed_bukhari.jsonl
 
 Collections (Podia):
-  bukhari_book_podia      ← processed_bukhari_podia/bukhari_podia_hadiths.jsonl
-  narrators_podia         ← processed_bukhari_podia/bukhari_podia_narrators.jsonl
-  narrators_tarajem_podia ← processed_bukhari_podia/narrators_tarajem.jsonl
+  raw_podia_books                ← processed_bukhari_podia/bukhari_podia_hadiths.jsonl
+  raw_podia_narrators            ← processed_bukhari_podia/bukhari_podia_narrators.jsonl
+  raw_podia_narrator_biographies ← processed_bukhari_podia/narrators_tarajem.jsonl
 
 Usage:
     python mongo_migration/upload.py
@@ -48,13 +48,13 @@ _PROCESSED_PODIA   = pathlib.Path(__file__).parent / "processed_bukhari_podia"
 # upsert_key_fields: tuple of doc fields used to identify an existing document.
 SOURCES = [
     # Shamela sources
-    (_PROCESSED_SHAMELA / "hadith_pages.jsonl",         "hadith_pages",  ("book_id", "page_number")),
-    (_PROCESSED_SHAMELA / "narrators.jsonl",             "narrators",     ("narrator_id",)),
-    (_PROCESSED_SHAMELA / "preprocessed_bukhari.jsonl",  "bukhari_book",  ("source", "hadith_index")),
+    (_PROCESSED_SHAMELA / "hadith_pages.jsonl",         "raw_shamela_hadith_pages", ("book_id", "page_number")),
+    (_PROCESSED_SHAMELA / "narrators.jsonl",             "raw_shamela_narrators",    ("narrator_id",)),
+    (_PROCESSED_SHAMELA / "preprocessed_bukhari.jsonl",  "raw_shamela_books",        ("source", "hadith_index")),
     # Podia sources
-    (_PROCESSED_PODIA / "bukhari_podia_hadiths.jsonl",   "bukhari_book_podia", ("hadith_url",)),
-    (_PROCESSED_PODIA / "bukhari_podia_narrators.jsonl", "narrators_podia",    ("rawi_id",)),
-    (_PROCESSED_PODIA / "narrators_tarajem.jsonl",       "narrators_tarajem_podia", ("rawi_id",)),
+    (_PROCESSED_PODIA / "bukhari_podia_hadiths.jsonl",   "raw_podia_books",                ("hadith_url",)),
+    (_PROCESSED_PODIA / "bukhari_podia_narrators.jsonl", "raw_podia_narrators",            ("rawi_id",)),
+    (_PROCESSED_PODIA / "narrators_tarajem.jsonl",       "raw_podia_narrator_biographies", ("rawi_id",)),
 ]
 
 

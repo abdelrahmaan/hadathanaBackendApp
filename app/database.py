@@ -13,35 +13,35 @@ def get_db(client: AsyncIOMotorClient):
 
 
 def get_hadiths_collection(db):
-    return db["bukhari_book"]
+    return db["raw_shamela_books"]
 
 
 def get_narrators_collection(db):
-    return db["narrators"]
+    return db["raw_shamela_narrators"]
 
 
 def get_hadith_pages_collection(db):
-    return db["hadith_pages"]
+    return db["raw_shamela_hadith_pages"]
 
 
 def get_narrator_stats_collection(db):
-    return db["narrator_stats"]
+    return db["analytics_narrator_stats_shamela"]
 
 
 def get_podia_hadiths_collection(db):
-    return db["bukhari_book_podia"]
+    return db["raw_podia_books"]
 
 
 def get_podia_narrators_collection(db):
-    return db["narrators_podia"]
+    return db["raw_podia_narrators"]
 
 
 def get_podia_narrator_stats_collection(db):
-    return db["narrator_stats_podia"]
+    return db["analytics_narrator_stats_podia"]
 
 
 def get_podia_narrators_tarajem_collection(db):
-    return db["narrators_tarajem_podia"]
+    return db["raw_podia_narrator_biographies"]
 
 
 async def connect():

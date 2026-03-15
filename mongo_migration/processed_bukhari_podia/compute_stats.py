@@ -1,5 +1,5 @@
 """
-Compute per-narrator statistics from bukhari_book_podia and write to narrator_stats_podia.
+Compute per-narrator statistics from raw_podia_books and write to analytics_narrator_stats_podia.
 
 For each narrator (by rawi_id), computes:
   - hadith_count : number of distinct hadiths the narrator appears in
@@ -36,8 +36,8 @@ if not MONGODB_URI:
     sys.exit("ERROR: MONGODB_URI_READ_WRITE (or MONGODB_URI) not found in environment / .env file")
 
 DB_NAME = os.environ.get("DB_NAME", "HadithData")
-SOURCE_COLLECTION = "bukhari_book_podia"
-TARGET_COLLECTION = "narrator_stats_podia"
+SOURCE_COLLECTION = "raw_podia_books"
+TARGET_COLLECTION = "analytics_narrator_stats_podia"
 
 
 def build_pipeline() -> list:
