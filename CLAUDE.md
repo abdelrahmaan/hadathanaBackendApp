@@ -59,7 +59,7 @@ Podia pipeline:
 - `raw_podia_narrator_biographies` - Narrator biographies (tarajem)
 
 Analytics:
-- `analytics_narrator_stats` - Shamela teacher/student statistics
+- `analytics_narrator_stats_shamela` - Shamela teacher/student statistics
 - `analytics_narrator_stats_podia` - Podia teacher/student statistics
 
 Future (not yet populated):

@@ -68,7 +68,7 @@
 
 ### MongoDB Upload
 - [x] Batch upsert (500 docs/batch) to 6+ collections
-- [x] Shamela collections: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats`
+- [x] Shamela collections: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats_shamela`
 - [x] Podia collections: `raw_podia_books`, `raw_podia_narrators`, `raw_podia_narrator_biographies`, `analytics_narrator_stats_podia`
 - [x] Index creation for optimized queries (unique, text, compound indexes)
 - [x] Renamed all collections to new schema (prefixed by source: `raw_shamela_*`, `raw_podia_*`, `analytics_*`)
@@ -227,3 +227,14 @@
 - `mongo_migration/processed_bukhari_shamela/compute_stats.py`
 - `mongo_migration/processed_bukhari_podia/compute_stats.py`
 - `CLAUDE.md`
+
+### Rename analytics_narrator_stats → analytics_narrator_stats_shamela (2026-03-15)
+**Status**: Done
+**Summary**: Renamed `analytics_narrator_stats` to `analytics_narrator_stats_shamela` to be consistent with the `_shamela` suffix pattern used across all other Shamela collections.
+**Touched files**:
+- `app/database.py`
+- `mongo_migration/create_indexes.py`
+- `mongo_migration/rename_collections.py`
+- `mongo_migration/processed_bukhari_shamela/compute_stats.py`
+- `CLAUDE.md`
+- `tasks.md`
