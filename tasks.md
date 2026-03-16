@@ -228,6 +228,13 @@
 - `mongo_migration/processed_bukhari_podia/compute_stats.py`
 - `CLAUDE.md`
 
+### Update README.md with current collection names and pipeline commands (2026-03-16)
+**Status**: Done
+**Summary**: Updated README.md to reflect current MongoDB collection names (`analytics_narrator_stats_shamela`, `raw_shamela_*`, `raw_podia_*`), corrected env var from `MONGODB_URI` to `MONGODB_URI_READ`, and replaced stale pipeline steps with the current two-pipeline structure.
+**Touched files**:
+- `README.md`
+- `tasks.md`
+
 ### Rename analytics_narrator_stats → analytics_narrator_stats_shamela (2026-03-15)
 **Status**: Done
 **Summary**: Renamed `analytics_narrator_stats` to `analytics_narrator_stats_shamela` to be consistent with the `_shamela` suffix pattern used across all other Shamela collections.

@@ -10,7 +10,7 @@ Follow these rules strictly for **every task, no exceptions**:
 1. **Read `tasks.md`** first to understand project context and current progress
 2. **Mark the relevant item as `in_progress`** in `tasks.md` before starting any work
 3. **Implement** the requested change
-4. **Update `tasks.md`** immediately after finishing — the update MUST include:
+4. **Update `tasks.md` and ** `README .md` immediately after finishing — the update MUST include:
    - Status changed to done/completed
    - A short summary of what was done
    - List of all touched files

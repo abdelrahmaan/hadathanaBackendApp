@@ -124,7 +124,7 @@ docker build -t hadathna-api .
 
 # Run (pass env vars at runtime, never bake them into the image)
 docker run -p 8000:8000 \
-  -e MONGODB_URI="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/" \
+  -e MONGODB_URI_READ="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/" \
   -e DB_NAME="HadithData" \
   -e CORS_ORIGINS="*" \
   hadathna-api
@@ -246,7 +246,7 @@ API docs: http://localhost:8000/docs
 2. Create a new project on [Railway](https://railway.app) or [Render](https://render.com) and connect the repo
 3. Set environment variables in the platform dashboard:
    ```
-   MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+   MONGODB_URI_READ=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
    DB_NAME=HadithData
    CORS_ORIGINS=*
    ```
@@ -258,20 +258,26 @@ API docs: http://localhost:8000/docs
 Before the API returns data, run the migration pipeline:
 
 ```bash
-# Step 1 — pre-process raw JSONL files into mongo_migration/processed/
-python mongo_migration/pre_processing.py
+PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
 
-# Step 2 — upload processed files to MongoDB Atlas
-python mongo_migration/upload.py
+# Shamela pipeline
+"$PYTHON" mongo_migration/processed_bukhari_shamela/preprocess_pages.py
+"$PYTHON" mongo_migration/processed_bukhari_shamela/preprocess_hadiths.py
+"$PYTHON" mongo_migration/upload.py
+"$PYTHON" mongo_migration/create_indexes.py
+"$PYTHON" mongo_migration/processed_bukhari_shamela/compute_stats.py
 
-# Step 3 — compute narrator statistics (teachers, students, hadith counts)
-python mongo_migration/compute_narrator_stats.py
-
-# Step 4 — create indexes (run once; safe to re-run)
-python mongo_migration/create_indexes.py
+# Podia pipeline
+"$PYTHON" mongo_migration/processed_bukhari_podia/preprocess.py
+"$PYTHON" mongo_migration/upload.py
+"$PYTHON" mongo_migration/create_indexes.py
+"$PYTHON" mongo_migration/processed_bukhari_podia/compute_stats.py
 ```
 
-This populates four collections: `bukhari_book`, `narrators`, `hadith_pages`, `narrator_stats`.
+This populates the following collections:
+
+**Shamela**: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats_shamela`
+**Podia**: `raw_podia_books`, `raw_podia_narrators`, `raw_podia_narrator_biographies`, `analytics_narrator_stats_podia`
 
 `compute_narrator_stats.py` is idempotent — re-run it any time after new hadiths are added.
 
@@ -352,7 +358,7 @@ curl http://localhost:8000/api/v1/narrators/822/stats
 ### Environment Variables
 
 ```bash
-MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+MONGODB_URI_READ=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
 DB_NAME=HadithData
 
 # Use * to allow all origins (public API).
