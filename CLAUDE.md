@@ -10,12 +10,16 @@ Follow these rules strictly for **every task, no exceptions**:
 1. **Read `tasks.md`** first to understand project context and current progress
 2. **Mark the relevant item as `in_progress`** in `tasks.md` before starting any work
 3. **Implement** the requested change
-4. **Update `tasks.md` and ** `README .md` immediately after finishing — the update MUST include:
-   - Status changed to done/completed
-   - A short summary of what was done
-   - List of all touched files
+4. **Update docs** immediately after finishing — always update `tasks.md`, then update the docs below that apply:
 
-> **Both steps 2 and 4 are non-negotiable.** Never finish a task without updating `tasks.md`.
+| Doc | Update when |
+|---|---|
+| `tasks.md` | **Every task** — status, summary, touched files |
+| `README.md` | API endpoints change, setup steps change, env vars added |
+| `CLAUDE.md` | Architecture changes, collection names change, new commands or patterns |
+| `mongo_migration/processed_bukhari_*/schema_description.md` | Data schema or fields change |
+
+> **Steps 2 and 4 are non-negotiable.** Never finish a task without updating `tasks.md`.
 > If the task doesn't map to an existing item, add a new entry under the relevant version or the Chore Log section.
 
 ### Conventions
