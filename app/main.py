@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import connect, disconnect
-from .routers import hadiths, narrators, hadiths_podia, narrators_podia
+from .routers import hadiths_shamela, narrators_shamela, hadiths_podia, narrators_podia
 
 
 @asynccontextmanager
@@ -24,8 +24,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(hadiths.router)
-app.include_router(narrators.router)
+app.include_router(hadiths_shamela.router)
+app.include_router(narrators_shamela.router)
 app.include_router(hadiths_podia.router)
 app.include_router(narrators_podia.router)
 

@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 from ..database import get_client, get_db, get_narrators_collection, get_narrator_stats_collection
 from ..models.narrator import Narrator, NarratorStats, PaginatedNarrators
 
-router = APIRouter(prefix="/api/v1/narrators", tags=["narrators"])
+router = APIRouter(prefix="/api/v1/narrators", tags=["narrators-shamela"])
 
 
 def _doc_to_narrator(doc: dict) -> Narrator:

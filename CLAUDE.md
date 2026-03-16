@@ -37,7 +37,7 @@ Hadathna is a dual-backend Islamic hadith knowledge system combining MongoDB (RE
 - Uses Motor (async MongoDB driver) with connection lifecycle in `app/database.py`
 - Database connection is established in `lifespan` context manager (connects on startup, disconnects on shutdown)
 - CORS configured via `settings.get_cors_origins()` (comma-separated in `.env`)
-- Router structure: each data source has separate routers (`hadiths`, `narrators`, `hadiths_podia`, `narrators_podia`)
+- Router structure: each data source has separate routers (`hadiths_shamela`, `narrators_shamela`, `hadiths_podia`, `narrators_podia`)
 
 **Database access pattern**:
 ```python
@@ -77,7 +77,7 @@ Future (not yet populated):
 - `_clean` suffix: cleaned but preserves tashkeel
 - `_plain` suffix: cleaned + tashkeel stripped (for search/matching)
 
-**Narrator ID handling**: MongoDB stores both `int` and `string` variants - use `{"$in": [narrator_id, str(narrator_id)]}` for queries (see `app/routers/hadiths.py:40`)
+**Narrator ID handling**: MongoDB stores both `int` and `string` variants - use `{"$in": [narrator_id, str(narrator_id)]}` for queries (see `app/routers/hadiths_shamela.py:40`)
 
 ## Common Commands
 
@@ -252,9 +252,9 @@ curl http://localhost:8000/api/v1/narrators
 # Get narrator stats (teachers/students)
 curl http://localhost:8000/api/v1/narrators/822/stats
 
-# Podia endpoints (same structure)
-curl http://localhost:8000/api/v1/hadiths_podia
-curl http://localhost:8000/api/v1/narrators_podia
+# Podia endpoints (v2)
+curl http://localhost:8000/api/v2/hadiths
+curl http://localhost:8000/api/v2/narrators
 ```
 
 ## Deployment Notes

@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 from ..database import get_client, get_db, get_podia_hadiths_collection
 from ..models.hadith_podia import PodiaHadith, PaginatedPodiaHadiths
 
-router = APIRouter(prefix="/api/v1/podia/hadiths", tags=["podia-hadiths"])
+router = APIRouter(prefix="/api/v2/hadiths", tags=["hadiths-podia"])
 
 
 def _doc_to_hadith(doc: dict) -> PodiaHadith:

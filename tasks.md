@@ -84,13 +84,13 @@
 - [x] `GET /api/v1/narrators/{narrator_id}` - Single narrator detail
 - [x] `GET /api/v1/narrators/{narrator_id}/stats` - Teacher/student relationships with frequency
 
-### Podia Endpoints
-- [x] `GET /api/v1/podia/hadiths` - List with search (hadith_text_plain, rawi_id, book)
-- [x] `GET /api/v1/podia/hadiths/{hadith_index}` - Single hadith detail
-- [x] `GET /api/v1/podia/narrators` - List with search (full_name_plain, rank)
-- [x] `GET /api/v1/podia/narrators/{rawi_id}` - Single narrator detail
-- [x] `GET /api/v1/podia/narrators/{rawi_id}/tarajem` - Narrator biography
-- [x] `GET /api/v1/podia/narrators/{rawi_id}/stats` - Teacher/student stats
+### Podia Endpoints (v2)
+- [x] `GET /api/v2/hadiths` - List with search (hadith_text_plain, rawi_id, book)
+- [x] `GET /api/v2/hadiths/{hadith_index}` - Single hadith detail
+- [x] `GET /api/v2/narrators` - List with search (full_name_plain, rank)
+- [x] `GET /api/v2/narrators/{rawi_id}` - Single narrator detail
+- [x] `GET /api/v2/narrators/{rawi_id}/tarajem` - Narrator biography
+- [x] `GET /api/v2/narrators/{rawi_id}/stats` - Teacher/student stats
 
 ### Infrastructure
 - [x] Async MongoDB via Motor with connection lifecycle management
@@ -227,6 +227,25 @@
 - `mongo_migration/processed_bukhari_shamela/compute_stats.py`
 - `mongo_migration/processed_bukhari_podia/compute_stats.py`
 - `CLAUDE.md`
+
+### Rename Shamela router files to hadiths_shamela / narrators_shamela (2026-03-16)
+**Status**: Done
+**Summary**: Renamed `hadiths.py` → `hadiths_shamela.py` and `narrators.py` → `narrators_shamela.py` to match the `_shamela` naming pattern. Updated imports in `main.py` and stale references in `CLAUDE.md`.
+**Touched files**:
+- `app/routers/hadiths_shamela.py` (renamed from `hadiths.py`)
+- `app/routers/narrators_shamela.py` (renamed from `narrators.py`)
+- `app/main.py`
+- `CLAUDE.md`
+- `tasks.md`
+
+### Rename Podia API endpoints from /api/v1/podia/* to /api/v2/* (2026-03-16)
+**Status**: Done
+**Summary**: Changed Podia router prefixes from `/api/v1/podia/hadiths` and `/api/v1/podia/narrators` to `/api/v2/hadiths` and `/api/v2/narrators` to hide the data source from external consumers.
+**Touched files**:
+- `app/routers/hadiths_podia.py`
+- `app/routers/narrators_podia.py`
+- `CLAUDE.md`
+- `tasks.md`
 
 ### Update README.md with current collection names and pipeline commands (2026-03-16)
 **Status**: Done

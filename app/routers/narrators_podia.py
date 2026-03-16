@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 from ..database import get_client, get_db, get_podia_narrators_collection, get_podia_narrator_stats_collection, get_podia_narrators_tarajem_collection
 from ..models.narrator_podia import PodiaNarrator, PodiaNarratorStats, PodiaNarratorTarajem, PaginatedPodiaNarrators
 
-router = APIRouter(prefix="/api/v1/podia/narrators", tags=["podia-narrators"])
+router = APIRouter(prefix="/api/v2/narrators", tags=["narrators-podia"])
 
 
 def _doc_to_narrator(doc: dict) -> PodiaNarrator:

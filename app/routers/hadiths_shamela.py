@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 from ..database import get_client, get_db, get_hadiths_collection
 from ..models.hadith import Hadith, PaginatedHadiths
 
-router = APIRouter(prefix="/api/v1/hadiths", tags=["hadiths"])
+router = APIRouter(prefix="/api/v1/hadiths", tags=["hadiths-shamela"])
 
 
 def _normalize_narrator_id(value) -> int | None:
