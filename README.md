@@ -114,7 +114,25 @@ RETURN n.name, count(*) AS freq ORDER BY freq DESC LIMIT 10;
 
 ---
 
-## Docker Setup
+## Docker
+
+### Run the API locally with Docker
+
+```bash
+# Build the image
+docker build -t hadathna-api .
+
+# Run (pass env vars at runtime, never bake them into the image)
+docker run -p 8000:8000 \
+  -e MONGODB_URI_READ="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/" \
+  -e DB_NAME="HadithData" \
+  -e CORS_ORIGINS="*" \
+  hadathna-api
+```
+
+API available at http://localhost:8000 — health check: http://localhost:8000/health
+
+### Neo4j container (legacy graph pipeline only)
 
 ```bash
 # Create container (first time)
@@ -196,6 +214,290 @@ hadith_graph/
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
+```
+
+---
+
+## hadathana-api (FastAPI + MongoDB)
+
+FastAPI backend for the Hadathana Islamic app — exposes the REST API consumed by the frontend.
+
+### Setup
+
+```bash
+# 1. Create and activate venv
+python -m venv venv && source venv/bin/activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Copy env template and fill in credentials
+cp .env.example .env
+
+# 4. Run dev server
+uvicorn app.main:app --reload
+```
+
+API docs: http://localhost:8000/docs
+
+### Deploy to Railway / Render
+
+1. Push the repo to GitHub
+2. Create a new project on [Railway](https://railway.app) or [Render](https://render.com) and connect the repo
+3. Set environment variables in the platform dashboard:
+   ```
+   MONGODB_URI_READ=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+   DB_NAME=HadithData
+   CORS_ORIGINS=*
+   ```
+4. In MongoDB Atlas → **Network Access** → allow `0.0.0.0/0` (or the platform's IP range)
+5. The platform will auto-detect the `Dockerfile` and deploy
+
+### Populate the database
+
+Before the API returns data, run the migration pipeline:
+
+```bash
+PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
+
+# Shamela pipeline
+"$PYTHON" mongo_migration/processed_bukhari_shamela/preprocess_pages.py
+"$PYTHON" mongo_migration/processed_bukhari_shamela/preprocess_hadiths.py
+"$PYTHON" mongo_migration/upload.py
+"$PYTHON" mongo_migration/create_indexes.py
+"$PYTHON" mongo_migration/processed_bukhari_shamela/compute_stats.py
+
+# Podia pipeline
+"$PYTHON" mongo_migration/processed_bukhari_podia/preprocess.py
+"$PYTHON" mongo_migration/upload.py
+"$PYTHON" mongo_migration/create_indexes.py
+"$PYTHON" mongo_migration/processed_bukhari_podia/compute_stats.py
+```
+
+This populates the following collections:
+
+**Shamela**: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats_shamela`
+**Podia**: `processed_podia_books`, `raw_podia_books`, `processed_podia_narrators`, `processed_podia_narrator_biographies`, `analytics_narrator_stats_podia`
+
+`compute_narrator_stats.py` is idempotent — re-run it any time after new hadiths are added.
+
+### Endpoints
+
+#### v1 — Shamela
+
+| Method | Path | Query params | Response |
+|--------|------|-------------|----------|
+| GET | `/api/v1/hadiths` | `hadith_plain`, `narrator_id`, `chain_type`, `skip`, `limit` | `PaginatedHadiths` |
+| GET | `/api/v1/hadiths/{hadith_index}` | — | `Hadith` |
+| GET | `/api/v1/narrators` | `name_plain`, `kunya`, `nasab`, `skip`, `limit` | `PaginatedNarrators` |
+| GET | `/api/v1/narrators/{narrator_id}` | — | `Narrator` |
+| GET | `/api/v1/narrators/{narrator_id}/stats` | — | `NarratorStats` |
+| GET | `/health` | — | `{ "status": "ok" }` |
+
+#### v2 — Podia
+
+| Method | Path | Query params | Response |
+|--------|------|-------------|----------|
+| GET | `/api/v2/hadiths` | `hadith_text_plain`, `rawi_id`, `book`, `hadith_index`, `skip`, `limit` | `PaginatedPodiaHadiths` |
+| GET | `/api/v2/hadiths/{hadith_index}` | — | `PodiaHadith` |
+| GET | `/api/v2/narrators` | `full_name_plain`, `rank`, `skip`, `limit` | `PaginatedPodiaNarrators` |
+| GET | `/api/v2/narrators/{rawi_id}` | — | `PodiaNarrator` |
+| GET | `/api/v2/narrators/{rawi_id}/tarajem` | — | `PodiaNarratorTarajem` |
+| GET | `/api/v2/narrators/{rawi_id}/stats` | — | `PodiaNarratorStats` |
+
+---
+
+### Data Field Comparison
+
+#### Hadith fields
+
+| Field | v1 Shamela | v2 Podia | Notes |
+|-------|:---:|:---:|-------|
+| `id` | ✅ | ✅ | MongoDB ObjectId as string |
+| `hadith_index` / `hadith_indices` | ✅ single int | ✅ list of ints | Podia hadiths can span multiple indices |
+| `source` | ✅ | ✅ | |
+| `hadith` / `hadith_text` | ✅ | ✅ | Full text with tashkeel |
+| `hadith_plain` / `hadith_text_plain` | ✅ | ✅ | Tashkeel stripped, for search |
+| `book` | ❌ | ✅ | |
+| `chapter` | ❌ | ✅ | |
+| `hadith_url` | ❌ | ✅ | Source URL |
+| `matn_plain` | ✅ list | ❌ | Matn segments (Shamela only) |
+| `n_matn` | ✅ | ❌ | Count of matn segments |
+| `n_chains` | ✅ | ❌ | Count of chains |
+| `chains[]` | ✅ | ❌ | Typed chain structure (primary/nested/follow_up) |
+| `unique_narrators[]` | ✅ | ❌ | Deduped narrator list |
+| `narrators[]` | ❌ | ✅ | Per-hadith narrator list with rank |
+
+#### Narrator fields
+
+| Field | v1 Shamela | v2 Podia | Notes |
+|-------|:---:|:---:|-------|
+| `id` | ✅ | ✅ | MongoDB ObjectId as string |
+| `narrator_id` / `rawi_id` | ✅ | ✅ | Integer narrator ID |
+| `name` / `name_in_chain` | ✅ | ✅ | Name as it appears in chain |
+| `name_plain` / `name_in_chain_plain` | ✅ | ✅ | Tashkeel stripped |
+| `full_name` | ❌ | ✅ | |
+| `full_name_plain` | ❌ | ✅ | |
+| `rank` | ❌ | ✅ | |
+| `rank_plain` | ❌ | ✅ | |
+| `full_tooltip_info` | ❌ | ✅ | Raw tooltip text from source |
+| `kunya` | ✅ | ❌ | |
+| `nasab` | ✅ | ❌ | |
+| `tabaqa` | ✅ | ❌ | Generation/layer |
+| `rank_ibn_hajar` | ✅ | ❌ | Individual scholar ranking |
+| `rank_dhahabi` | ✅ | ❌ | Individual scholar ranking |
+| `relations` | ✅ | ❌ | |
+| `jarh_wa_tadil[]` | ✅ | ❌ | Available in v2 via `/tarajem` |
+| `death_date` | ✅ | ❌ | Available in v2 via `/tarajem` |
+
+#### Narrator stats (same structure in both)
+
+| Field | v1 Shamela | v2 Podia |
+|-------|:---:|:---:|
+| `narrator_id` / `rawi_id` | ✅ | ✅ |
+| `hadith_count` | ✅ | ✅ |
+| `teachers[]` (`narrator_id`, `name`, `freq`) | ✅ | ✅ |
+| `students[]` (`narrator_id`, `name`, `freq`) | ✅ | ✅ |
+
+#### v2-only: `/tarajem` endpoint (narrator biography)
+
+| Field | Notes |
+|-------|-------|
+| `rawi_id` | Narrator ID |
+| `url` | Source URL |
+| `name_in_chain`, `name_in_chain_plain` | Name as in chain |
+| `full_name`, `full_name_plain` | Full canonical name |
+| `rank`, `rank_plain` | |
+| `narrator_info[]` | `action` + `text` + `text_plain` — structured biography entries |
+| `tarajim[]` | `source` + `tarjama` + `tarjama_plain` — scholar biography texts |
+
+---
+
+### Advanced Extraction Data (Neo4j only)
+
+`extract_data_v2/playwrite/bukhari_pedia_advanced_extraction_results.json` contains richer chain data for **7,076 hadiths** extracted by LLM. This data goes to **Neo4j**, not MongoDB.
+
+| Field | Present | Notes |
+|-------|:---:|-------|
+| `hadith_indices` | ✅ | List of ints |
+| `hadith_url` | ✅ | |
+| `book_name`, `chapter` | ✅ | |
+| `hadith_text`, `hadith_text_clean` | ✅ | Raw + cleaned |
+| `sanad_text` | ✅ | Chain text only |
+| `matn_text` | ✅ | Matn text only |
+| `tawabi_text` | ✅ | Follow-up text |
+| `chains[]` | ✅ | Multi-chain support (1,614 hadiths have >1 chain) |
+| `chains[].type` | ✅ | `primary` / `nested` / `follow_up` |
+| `chains[].narrators[].rawi_id` | ✅ | |
+| `chains[].narrators[].name` | ✅ | |
+| `chains[].narrators[].role` | ✅ | `narrator` / `lead` |
+| `chains[].narrators[].transmission` | ✅ | Arabic transmission word (e.g. حدثنا) |
+| `chains[].narrators[].transmission_type` | ✅ | `samaa` / `ambiguous` / `anana` / `ijaza_or_munawala` / `mukataba` / `samaa_or_ard` / `unknown` |
+| `chains[].narrators[].is_explicit_hearing` | ✅ | Boolean |
+| `ground_truth_match` | ✅ | LLM validation flag |
+| `model_used` | ✅ | LLM model used for extraction |
+| `route_reason` | ✅ | Why this route was chosen (e.g. `length_threshold`) |
+
+---
+
+#### Example requests
+
+```bash
+# v1 — Shamela
+curl http://localhost:8000/api/v1/hadiths
+curl "http://localhost:8000/api/v1/hadiths?hadith_plain=نام"
+curl "http://localhost:8000/api/v1/hadiths?narrator_id=822"
+curl http://localhost:8000/api/v1/hadiths/1
+curl http://localhost:8000/api/v1/narrators
+curl "http://localhost:8000/api/v1/narrators?name_plain=مالك"
+curl http://localhost:8000/api/v1/narrators/822
+curl http://localhost:8000/api/v1/narrators/822/stats
+
+# v2 — Podia
+curl http://localhost:8000/api/v2/hadiths
+curl "http://localhost:8000/api/v2/hadiths?hadith_text_plain=نام"
+curl "http://localhost:8000/api/v2/hadiths?rawi_id=822"
+curl http://localhost:8000/api/v2/hadiths/1
+curl http://localhost:8000/api/v2/narrators
+curl "http://localhost:8000/api/v2/narrators?full_name_plain=مالك"
+curl http://localhost:8000/api/v2/narrators/822
+curl http://localhost:8000/api/v2/narrators/822/tarajem
+curl http://localhost:8000/api/v2/narrators/822/stats
+```
+
+#### Response shapes
+
+```jsonc
+// v1 PaginatedHadiths
+{ "items": [ { "id": "...", "hadith_index": 1, "source": "bukhari",
+               "hadith": "...", "hadith_plain": "...", "matn_plain": [...],
+               "n_matn": 1, "n_chains": 2,
+               "chains": [{ "chain_id": "...", "type": "primary",
+                            "narrators": [{ "name": "...", "role": "narrator", "narrator_id": 1 }] }],
+               "unique_narrators": [{ "name": "...", "narrator_id": 1 }] }],
+  "total": 7230 }
+
+// v1 PaginatedNarrators
+{ "items": [ { "id": "...", "narrator_id": 1, "name": "...", "name_plain": "...",
+               "kunya": "...", "nasab": "...", "death_date": "...", "tabaqa": "...",
+               "rank_ibn_hajar": "...", "rank_dhahabi": "...", "relations": "...",
+               "jarh_wa_tadil": [{ "scholar": "...", "quotes": ["..."] }] }],
+  "total": 1527 }
+
+// v1 NarratorStats
+{ "narrator_id": 822, "hadith_count": 195,
+  "teachers": [{ "narrator_id": 3320, "name": "أبو هريرة", "freq": 38 }],
+  "students": [{ "narrator_id": 857,  "name": "أيوب",      "freq": 47 }] }
+
+// v2 PaginatedPodiaHadiths
+{ "items": [ { "id": "...", "hadith_url": "...", "hadith_indices": [1],
+               "source": "bukhari", "book": "...", "chapter": "...",
+               "hadith_text": "...", "hadith_text_plain": "...",
+               "narrators": [{ "rawi_id": 1, "name_in_chain": "...",
+                               "name_in_chain_plain": "...", "full_name": "...",
+                               "rank": "...", "rank_plain": "..." }] }],
+  "total": 7008 }
+
+// v2 PaginatedPodiaNarrators
+{ "items": [ { "id": "...", "rawi_id": 1, "name_in_chain": "...",
+               "name_in_chain_plain": "...", "full_name": "...", "full_name_plain": "...",
+               "rank": "...", "rank_plain": "...", "full_tooltip_info": "..." }],
+  "total": 1600 }
+
+// v2 PodiaNarratorTarajem
+{ "id": "...", "rawi_id": 1, "url": "...",
+  "name_in_chain": "...", "full_name": "...", "rank": "...",
+  "narrator_info": [{ "action": "...", "text": "...", "text_plain": "..." }],
+  "tarajim": [{ "source": "...", "tarjama": "...", "tarjama_plain": "..." }] }
+
+// v2 PodiaNarratorStats
+{ "rawi_id": 822, "hadith_count": 195,
+  "teachers": [{ "rawi_id": 3320, "name": "أبو هريرة", "freq": 38 }],
+  "students": [{ "rawi_id": 857,  "name": "أيوب",      "freq": 47 }] }
+```
+
+### Test results (2026-02-24)
+
+| Endpoint | Status | Result |
+|----------|--------|--------|
+| `GET /api/v1/hadiths` | ✅ 200 | `total=7008`, 20 items per page |
+| `GET /api/v1/hadiths?hadith_plain=نام` | ✅ 200 | `total=125` matching hadiths |
+| `GET /api/v1/hadiths/{id}` | ✅ 200 | Full hadith with `chains[]` and `unique_narrators[]` |
+| `GET /api/v1/narrators` | ✅ 200 | `total=1523`, 20 items per page |
+| `GET /api/v1/narrators?name_plain=مالك` | ✅ 200 | `total=145` matching narrators |
+| `GET /api/v1/narrators/{id}` | ✅ 200 | Full narrator with `jarh_wa_tadil[]` |
+| `GET /api/v1/narrators/{id}/stats` | ✅ 200 | `hadith_count`, `teachers[]`, `students[]` with frequencies |
+
+### Environment Variables
+
+```bash
+MONGODB_URI_READ=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+DB_NAME=HadithData
+
+# Use * to allow all origins (public API).
+# For restricted access, use comma-separated list:
+# CORS_ORIGINS=https://hadathana.com,https://www.hadathana.com
+CORS_ORIGINS=*
 ```
 
 ---
