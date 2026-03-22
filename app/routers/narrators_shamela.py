@@ -1,7 +1,12 @@
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import ValidationError
 
 from ..database import get_client, get_db, get_narrators_collection, get_narrator_stats_collection
 from ..models.narrator import Narrator, NarratorStats, PaginatedNarrators
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/narrators", tags=["narrators-shamela"])
 
@@ -32,7 +37,14 @@ async def list_narrators(
 
     cursor = collection.find(query_filter).skip(skip).limit(limit)
     total = await collection.count_documents(query_filter)
-    items = [_doc_to_narrator(doc) async for doc in cursor]
+
+    items = []
+    async for doc in cursor:
+        doc_id = doc.get("_id")
+        try:
+            items.append(_doc_to_narrator(doc))
+        except (ValidationError, Exception) as e:
+            logger.warning("Skipping malformed narrator doc _id=%s: %s", doc_id, e)
 
     return PaginatedNarrators(items=items, total=total)
 
@@ -47,7 +59,11 @@ async def get_narrator(narrator_id: int):
     if not doc:
         raise HTTPException(status_code=404, detail="Narrator not found.")
 
-    return _doc_to_narrator(doc)
+    try:
+        return _doc_to_narrator(doc)
+    except (ValidationError, Exception) as e:
+        logger.error("Failed to parse narrator id=%s: %s", narrator_id, e)
+        raise HTTPException(status_code=500, detail="Narrator data is malformed.")
 
 
 @router.get("/{narrator_id}/stats", response_model=NarratorStats)
@@ -60,5 +76,9 @@ async def get_narrator_stats(narrator_id: int):
     if not doc:
         raise HTTPException(status_code=404, detail="Narrator stats not found.")
 
-    doc.pop("_id", None)
-    return NarratorStats(**doc)
+    try:
+        doc.pop("_id", None)
+        return NarratorStats(**doc)
+    except (ValidationError, Exception) as e:
+        logger.error("Failed to parse narrator stats id=%s: %s", narrator_id, e)
+        raise HTTPException(status_code=500, detail="Narrator stats data is malformed.")

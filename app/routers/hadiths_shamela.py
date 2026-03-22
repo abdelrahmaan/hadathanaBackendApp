@@ -1,7 +1,12 @@
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import ValidationError
 
 from ..database import get_client, get_db, get_hadiths_collection
 from ..models.hadith import Hadith, PaginatedHadiths
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/hadiths", tags=["hadiths-shamela"])
 
@@ -46,7 +51,14 @@ async def list_hadiths(
 
     cursor = collection.find(query_filter).skip(skip).limit(limit)
     total = await collection.count_documents(query_filter)
-    items = [_doc_to_hadith(doc) async for doc in cursor]
+
+    items = []
+    async for doc in cursor:
+        doc_id = doc.get("_id")
+        try:
+            items.append(_doc_to_hadith(doc))
+        except (ValidationError, Exception) as e:
+            logger.warning("Skipping malformed hadith doc _id=%s: %s", doc_id, e)
 
     return PaginatedHadiths(items=items, total=total)
 
@@ -61,4 +73,8 @@ async def get_hadith(hadith_id: int):
     if not doc:
         raise HTTPException(status_code=404, detail="Hadith not found.")
 
-    return _doc_to_hadith(doc)
+    try:
+        return _doc_to_hadith(doc)
+    except (ValidationError, Exception) as e:
+        logger.error("Failed to parse hadith id=%s: %s", hadith_id, e)
+        raise HTTPException(status_code=500, detail="Hadith data is malformed.")

@@ -29,19 +29,23 @@ def get_narrator_stats_collection(db):
 
 
 def get_podia_hadiths_collection(db):
-    return db["raw_podia_books"]
+    return db["processed_podia_books"]
 
 
 def get_podia_narrators_collection(db):
-    return db["raw_podia_narrators"]
+    return db["processed_podia_narrators"]
 
 
 def get_podia_narrator_stats_collection(db):
     return db["analytics_narrator_stats_podia"]
 
 
+def get_podia_raw_hadiths_collection(db):
+    return db["raw_podia_books"]
+
+
 def get_podia_narrators_tarajem_collection(db):
-    return db["raw_podia_narrator_biographies"]
+    return db["processed_podia_narrator_biographies"]
 
 
 async def connect():
