@@ -216,6 +216,17 @@
 
 ## Chore Log
 
+### Podia data quality fix: use advanced extraction as MongoDB source (2026-03-16)
+**Status**: Done
+**Summary**: Rewrote `preprocess.py` to read from `bukhari_pedia_advanced_extraction_results.json` (7,076 hadiths) instead of the raw scrape. MongoDB documents now include `sanad_text`, `matn_text`, `tawabi_text`, and a `chains[]` array with per-narrator transmission data (`transmission`, `transmission_type`, `is_explicit_hearing`, `role`). The flat `narrators[]` array is retained for backwards-compatible filtering. Updated Pydantic model (`hadith_podia.py`) with new fields. Fixed `compute_stats.py` to unwind `chains[]` before computing teacher/student adjacency — previously the flat narrator array caused incorrect cross-chain pairings for the 22.8% of hadiths with multiple chains.
+**Touched files**:
+- `mongo_migration/processed_bukhari_podia/preprocess.py`
+- `mongo_migration/processed_bukhari_podia/compute_stats.py`
+- `app/models/hadith_podia.py`
+- `tasks.md`
+
+
+
 ### MongoDB Collection Rename (2026-03-15)
 **Status**: Done
 **Summary**: Renamed all 8 MongoDB collections to a structured naming schema with source prefixes.
@@ -245,6 +256,13 @@
 - `app/routers/hadiths_podia.py`
 - `app/routers/narrators_podia.py`
 - `CLAUDE.md`
+- `tasks.md`
+
+### Update README.md with full data field comparison tables and advanced extraction docs (2026-03-16)
+**Status**: Done
+**Summary**: Expanded README.md Endpoints section with v1/v2 split endpoint tables, a full hadith/narrator field comparison table showing what each pipeline provides, a v2-only `/tarajem` field list, and a new section documenting the advanced extraction JSON (7,076 hadiths, chain types, transmission types) that feeds Neo4j.
+**Touched files**:
+- `README.md`
 - `tasks.md`
 
 ### Update README.md with current collection names and pipeline commands (2026-03-16)

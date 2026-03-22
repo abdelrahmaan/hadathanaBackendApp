@@ -9,7 +9,11 @@ Follow these rules strictly for **every task, no exceptions**:
 ### Task Tracking — MANDATORY steps in order
 1. **Read `tasks.md`** first to understand project context and current progress
 2. **Mark the relevant item as `in_progress`** in `tasks.md` before starting any work
-3. **Implement** the requested change
+3. **Write tests first** (API endpoints and data-processing tasks only — skip for docs, renames, config-only changes):
+   - Write test cases that define the expected behaviour
+   - Run them with `pytest` and confirm they **fail** (red)
+   - Then implement the code until they **pass** (green)
+   - Tests live in `tests/` using `pytest` + `httpx` for API endpoints
 4. **Update docs** immediately after finishing — always update `tasks.md`, then update the docs below that apply:
 
 | Doc | Update when |
@@ -18,8 +22,9 @@ Follow these rules strictly for **every task, no exceptions**:
 | `README.md` | API endpoints change, setup steps change, env vars added |
 | `CLAUDE.md` | Architecture changes, collection names change, new commands or patterns |
 | `mongo_migration/processed_bukhari_*/schema_description.md` | Data schema or fields change |
+| `.env.example` | New env vars added or existing ones renamed |
 
-> **Steps 2 and 4 are non-negotiable.** Never finish a task without updating `tasks.md`.
+> **Steps 2, 3, and 4 are non-negotiable.** Never finish a task without updating `tasks.md`.
 > If the task doesn't map to an existing item, add a new entry under the relevant version or the Chore Log section.
 
 ### Conventions
@@ -96,6 +101,13 @@ uvicorn app.main:app --reload
 ```
 
 API docs: http://localhost:8000/docs
+
+### Tests
+
+```bash
+PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
+"$PYTHON" -m pytest tests/ -v
+```
 
 ### Docker
 
@@ -184,7 +196,7 @@ if hadith_plain:
 - Multi-chain structure with transmission types
 - Ideal for: "Find all teachers of X", "Show narrator relationships"
 
-**Important**: Podia advanced extraction data (`bukhari_pedia_advanced_extraction_results.json`) goes to Neo4j, NOT MongoDB. The two databases serve different query patterns with overlapping but distinct data.
+**Important**: Podia advanced extraction data (`bukhari_pedia_advanced_extraction_results.json`) feeds BOTH MongoDB (via `preprocess.py`) and Neo4j (via `build_graph.py`). The two databases serve different query patterns with overlapping but distinct data.
 
 ## Environment Variables
 
@@ -224,9 +236,9 @@ PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
 - `extract_data_v2/Bukhari/narrators_list.json` - ground truth
 
 **Podia input**:
-- `extract_data_v2/playwrite/hadith_narrators_bukhari_pedia_playwrite_preprocessing.jsonl`
-- `extract_data_v2/playwrite/narrators_bukhari_pedia_playwrite.jsonl`
-- `mongo_migration/processed_bukhari_podia/bukhari_narrators_tarajem.jsonl`
+- `bukhari_pedia_advanced_extraction_results.json` — primary source (7,076 hadiths, GPT-4o chains with transmission types)
+- `extract_data_v2/playwrite/narrators_bukhari_pedia_playwrite.jsonl` — narrator profiles
+- `mongo_migration/processed_bukhari_podia/bukhari_narrators_tarajem.jsonl` — narrator biographies
 
 **Processed output** (ready for MongoDB):
 - `mongo_migration/processed_bukhari_shamela/*.jsonl`
