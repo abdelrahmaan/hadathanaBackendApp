@@ -396,6 +396,9 @@ def process_tarajem():
             tarajim = []
             for t in doc.get("tarajim", []):
                 tarjama = t.get("tarjama", "")
+                # Normalize \r\n to \n, then collapse multiple blank lines into one
+                tarjama = tarjama.replace("\r\n", "\n").replace("\r", "\n")
+                tarjama = re.sub(r"\n{2,}", "\n", tarjama).strip()
                 tarajim.append({
                     "source": t.get("source", ""),
                     "tarjama": tarjama,
