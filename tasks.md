@@ -69,7 +69,7 @@
 ### MongoDB Upload
 - [x] Batch upsert (500 docs/batch) to 6+ collections
 - [x] Shamela collections: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats_shamela`
-- [x] Podia collections: `raw_podia_books`, `raw_podia_narrators`, `raw_podia_narrator_biographies`, `analytics_narrator_stats_podia`
+- [x] Podia collections: `processed_podia_books`, `raw_podia_books`, `processed_podia_narrators`, `processed_podia_narrator_biographies`, `analytics_narrator_stats_podia`
 - [x] Index creation for optimized queries (unique, text, compound indexes)
 - [x] Renamed all collections to new schema (prefixed by source: `raw_shamela_*`, `raw_podia_*`, `analytics_*`)
 
@@ -216,13 +216,30 @@
 
 ## Chore Log
 
-### Podia data quality fix: use advanced extraction as MongoDB source (2026-03-16)
+### Rename Podia collections: raw_ → processed_ for processed data, raw_ for actual raw scrape (2026-03-17)
 **Status**: Done
-**Summary**: Rewrote `preprocess.py` to read from `bukhari_pedia_advanced_extraction_results.json` (7,076 hadiths) instead of the raw scrape. MongoDB documents now include `sanad_text`, `matn_text`, `tawabi_text`, and a `chains[]` array with per-narrator transmission data (`transmission`, `transmission_type`, `is_explicit_hearing`, `role`). The flat `narrators[]` array is retained for backwards-compatible filtering. Updated Pydantic model (`hadith_podia.py`) with new fields. Fixed `compute_stats.py` to unwind `chains[]` before computing teacher/student adjacency — previously the flat narrator array caused incorrect cross-chain pairings for the 22.8% of hadiths with multiple chains.
+**Summary**: Renamed Podia MongoDB collections so `raw_` consistently means unprocessed scrape data and `processed_` means pipeline-transformed data. `raw_podia_books` (was advanced extraction) → `processed_podia_books`. `raw_podia_raw_books` (was raw scrape) → `raw_podia_books`. `raw_podia_narrators` → `processed_podia_narrators`. `raw_podia_narrator_biographies` → `processed_podia_narrator_biographies`. Analytics collections unchanged.
+**Touched files**:
+- `app/database.py`
+- `mongo_migration/upload.py`
+- `mongo_migration/create_indexes.py`
+- `mongo_migration/processed_bukhari_podia/compute_stats.py`
+- `mongo_migration/rename_collections.py`
+- `CLAUDE.md`
+- `README.md`
+- `tasks.md`
+
+### Podia data quality fix: advanced extraction as primary source + store raw scrape (2026-03-16)
+**Status**: Done
+**Summary**: Rewrote `preprocess.py` to use `bukhari_pedia_advanced_extraction_results.json` (7,076 hadiths) as the primary MongoDB source. Primary documents (`raw_podia_books`) now include `sanad_text`, `matn_text`, `tawabi_text`, and `chains[]` with per-narrator transmission data (`transmission`, `transmission_type`, `is_explicit_hearing`, `role`). Added `process_raw_hadiths()` to also output raw scrape data (`raw_podia_raw_books`) with `full_name`, `rank`, `full_tooltip_info` per narrator as audit trail. Fixed `compute_stats.py` to unwind `chains[]` before computing teacher/student adjacency — previously the flat narrator array caused incorrect cross-chain pairings for 22.8% of hadiths. Added `raw_podia_raw_books` to `upload.py`, `create_indexes.py`, and `database.py`.
 **Touched files**:
 - `mongo_migration/processed_bukhari_podia/preprocess.py`
 - `mongo_migration/processed_bukhari_podia/compute_stats.py`
+- `mongo_migration/upload.py`
+- `mongo_migration/create_indexes.py`
 - `app/models/hadith_podia.py`
+- `app/database.py`
+- `CLAUDE.md`
 - `tasks.md`
 
 

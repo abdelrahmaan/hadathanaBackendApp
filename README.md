@@ -277,7 +277,7 @@ PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
 This populates the following collections:
 
 **Shamela**: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats_shamela`
-**Podia**: `raw_podia_books`, `raw_podia_narrators`, `raw_podia_narrator_biographies`, `analytics_narrator_stats_podia`
+**Podia**: `processed_podia_books`, `raw_podia_books`, `processed_podia_narrators`, `processed_podia_narrator_biographies`, `analytics_narrator_stats_podia`
 
 `compute_narrator_stats.py` is idempotent — re-run it any time after new hadiths are added.
 

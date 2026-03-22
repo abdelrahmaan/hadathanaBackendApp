@@ -62,10 +62,13 @@ Shamela pipeline:
 - `raw_shamela_narrators` - Shamela narrators
 - `raw_shamela_hadith_pages` - Raw Shamela pages
 
-Podia pipeline:
-- `raw_podia_books` - Podia hadiths
-- `raw_podia_narrators` - Podia narrators
-- `raw_podia_narrator_biographies` - Narrator biographies (tarajem)
+Podia pipeline (processed):
+- `processed_podia_books` - Podia hadiths (primary — from advanced extraction; includes `sanad_text`, `matn_text`, `tawabi_text`, `chains[]` with transmission data)
+- `processed_podia_narrators` - Podia narrators (deduplicated, with clean/plain name variants)
+- `processed_podia_narrator_biographies` - Narrator biographies (tarajem)
+
+Podia pipeline (raw):
+- `raw_podia_books` - Podia hadiths (raw scrape — includes `full_name`, `rank`, `full_tooltip_info` per narrator; audit trail / fallback)
 
 Analytics:
 - `analytics_narrator_stats_shamela` - Shamela teacher/student statistics
