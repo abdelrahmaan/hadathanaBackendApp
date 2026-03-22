@@ -46,7 +46,7 @@ INDEXES = {
         ([("narrator_id", ASCENDING)], {"unique": True}),
     ],
     # --- Podia collections ---
-    "raw_podia_books": [
+    "processed_podia_books": [
         # Query by any hadith index in the array
         ([("hadith_indices", ASCENDING)], {}),
         # Query by narrator rawi_id
@@ -56,7 +56,17 @@ INDEXES = {
         # Book browse
         ([("book", ASCENDING)], {}),
     ],
-    "raw_podia_narrators": [
+    "raw_podia_books": [
+        # URL-based unique lookup (upsert key)
+        ([("hadith_url", ASCENDING)], {"unique": True}),
+        # Query by any hadith index in the array
+        ([("hadith_indices", ASCENDING)], {}),
+        # Query by narrator rawi_id
+        ([("narrators.rawi_id", ASCENDING)], {}),
+        # Book browse
+        ([("book", ASCENDING)], {}),
+    ],
+    "processed_podia_narrators": [
         # Primary lookup (GET /podia/narrators/{rawi_id})
         ([("rawi_id", ASCENDING)], {"unique": True}),
         # Name search
@@ -66,7 +76,7 @@ INDEXES = {
     "analytics_narrator_stats_podia": [
         ([("rawi_id", ASCENDING)], {"unique": True}),
     ],
-    "raw_podia_narrator_biographies": [
+    "processed_podia_narrator_biographies": [
         ([("rawi_id", ASCENDING)], {"unique": True}),
         ([("full_name_plain", ASCENDING)], {}),
     ],

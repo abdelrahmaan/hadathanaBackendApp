@@ -1,24 +1,24 @@
 """
-Compute per-narrator statistics from raw_podia_books and write to analytics_narrator_stats_podia.
+Compute per-narrator statistics from processed_podia_books and write to analytics_narrator_stats_podia.
 
 For each narrator (by rawi_id), computes:
   - hadith_count : number of distinct hadiths the narrator appears in
   - teachers     : list of {rawi_id, name, freq} for narrators they
-                   received from (narrator at position i+1 in the array)
+                   received from (narrator at position i+1 in the chain)
   - students     : list of {rawi_id, name, freq} for narrators who
                    received from them (narrator at position i-1)
 
-Chain ordering rule (same as Shamela):
-  narrators[0] received from narrators[1] (teacher).
+Chain ordering rule:
+  chains[].narrators[0] received from narrators[1] (teacher).
   narrators[i] student is narrators[i-1], teacher is narrators[i+1].
 
-Difference from Shamela version: Podia has NO chains array — just a flat
-narrators array per hadith. So we skip the $unwind chains stage.
+Multi-chain hadiths: each chain is processed independently, so narrators from
+different chains are never incorrectly paired as teacher/student.
 
 Usage:
-    python mongo_migration/compute_narrator_stats_podia.py
+    python mongo_migration/processed_bukhari_podia/compute_stats.py
 
-Requires: MONGODB_URI (and optionally DB_NAME) in .env or environment.
+Requires: MONGODB_URI_READ_WRITE (or MONGODB_URI) in .env or environment.
 Re-running is fully idempotent — $out atomically replaces the collection.
 """
 
@@ -36,22 +36,41 @@ if not MONGODB_URI:
     sys.exit("ERROR: MONGODB_URI_READ_WRITE (or MONGODB_URI) not found in environment / .env file")
 
 DB_NAME = os.environ.get("DB_NAME", "HadithData")
-SOURCE_COLLECTION = "raw_podia_books"
+SOURCE_COLLECTION = "processed_podia_books"
 TARGET_COLLECTION = "analytics_narrator_stats_podia"
 
 
 def build_pipeline() -> list:
     """
-    Build the aggregation pipeline that computes narrator_stats from bukhari_book_podia.
+    Aggregation pipeline that computes narrator stats from processed_podia_books.
 
-    Simpler than Shamela version: no chains to unwind, just the flat narrators array.
+    Key difference from previous version: we unwind chains[] first and zip
+    within each chain, so multi-chain hadiths don't cause cross-chain
+    teacher/student pairings.
+
+    The chains[].narrators[] field contains objects with:
+      rawi_id, name_clean, name_plain (plus transmission fields).
+    The narrator name for stats uses name_clean (tashkeel kept).
     """
     return [
         # ------------------------------------------------------------------
-        # Stage 1: Build narrator_tuples with teacher/student from adjacency.
+        # Stage 1: Unwind chains — one doc per chain.
+        # ------------------------------------------------------------------
+        {
+            "$unwind": {
+                "path": "$chains",
+                "preserveNullAndEmptyArrays": False,
+            }
+        },
+
+        # ------------------------------------------------------------------
+        # Stage 2: Build narrator_tuples within each chain using adjacency.
         #
-        # Same $zip technique as Shamela but directly on $.narrators
-        # (no $unwind chains needed).
+        # For chain narrators [n0, n1, n2, n3]:
+        #   n0's teacher = n1, n0's student = null
+        #   n1's teacher = n2, n1's student = n0
+        #   n2's teacher = n3, n2's student = n1
+        #   n3's teacher = null, n3's student = n2
         # ------------------------------------------------------------------
         {
             "$project": {
@@ -62,13 +81,13 @@ def build_pipeline() -> list:
                             "$zip": {
                                 "inputs": [
                                     # Column 0: narrator at position i
-                                    "$narrators",
+                                    "$chains.narrators",
                                     # Column 1: narrator at position i+1 (teacher)
                                     {
                                         "$slice": [
-                                            "$narrators",
+                                            "$chains.narrators",
                                             1,
-                                            {"$size": "$narrators"},
+                                            {"$size": "$chains.narrators"},
                                         ]
                                     },
                                     # Column 2: narrator at position i-1 (student)
@@ -77,14 +96,14 @@ def build_pipeline() -> list:
                                             [None],
                                             {
                                                 "$cond": [
-                                                    {"$gt": [{"$size": "$narrators"}, 1]},
+                                                    {"$gt": [{"$size": "$chains.narrators"}, 1]},
                                                     {
                                                         "$slice": [
-                                                            "$narrators",
+                                                            "$chains.narrators",
                                                             0,
                                                             {
                                                                 "$subtract": [
-                                                                    {"$size": "$narrators"},
+                                                                    {"$size": "$chains.narrators"},
                                                                     1,
                                                                 ]
                                                             },
@@ -112,12 +131,12 @@ def build_pipeline() -> list:
         },
 
         # ------------------------------------------------------------------
-        # Stage 2: Flatten narrator_tuples — one tuple per document.
+        # Stage 3: Flatten narrator_tuples — one tuple per document.
         # ------------------------------------------------------------------
         {"$unwind": "$narrator_tuples"},
 
         # ------------------------------------------------------------------
-        # Stage 3: Drop tuples where the subject narrator has no rawi_id.
+        # Stage 4: Drop tuples where the subject narrator has no rawi_id.
         # ------------------------------------------------------------------
         {
             "$match": {
@@ -129,8 +148,9 @@ def build_pipeline() -> list:
         },
 
         # ------------------------------------------------------------------
-        # Stage 4: Group by (rawi_id, hadith_url) to deduplicate within a hadith.
-        # Using hadith_url as the hadith identity (since hadith_indices is an array).
+        # Stage 5: Group by (rawi_id, hadith_url) to deduplicate within a hadith.
+        # A narrator can appear in multiple chains of the same hadith; we count
+        # that as one hadith occurrence.
         # ------------------------------------------------------------------
         {
             "$group": {
@@ -149,7 +169,7 @@ def build_pipeline() -> list:
                             },
                             {
                                 "rawi_id": "$narrator_tuples.teacher.rawi_id",
-                                "name": {"$ifNull": ["$narrator_tuples.teacher.name_in_chain_clean", ""]},
+                                "name": {"$ifNull": ["$narrator_tuples.teacher.name_clean", ""]},
                             },
                             "$$REMOVE",
                         ]
@@ -166,7 +186,7 @@ def build_pipeline() -> list:
                             },
                             {
                                 "rawi_id": "$narrator_tuples.student.rawi_id",
-                                "name": {"$ifNull": ["$narrator_tuples.student.name_in_chain_clean", ""]},
+                                "name": {"$ifNull": ["$narrator_tuples.student.name_clean", ""]},
                             },
                             "$$REMOVE",
                         ]
@@ -176,7 +196,7 @@ def build_pipeline() -> list:
         },
 
         # ------------------------------------------------------------------
-        # Stage 5: Group by rawi_id alone — count distinct hadiths.
+        # Stage 6: Group by rawi_id alone — count distinct hadiths.
         # ------------------------------------------------------------------
         {
             "$group": {
@@ -188,7 +208,7 @@ def build_pipeline() -> list:
         },
 
         # ------------------------------------------------------------------
-        # Stage 6: Flatten array-of-arrays and tag with rel_type.
+        # Stage 7: Flatten array-of-arrays and tag with rel_type.
         # ------------------------------------------------------------------
         {
             "$project": {
@@ -236,7 +256,7 @@ def build_pipeline() -> list:
         },
 
         # ------------------------------------------------------------------
-        # Stage 7: Unwind relations.
+        # Stage 8: Unwind relations.
         # ------------------------------------------------------------------
         {
             "$unwind": {
@@ -246,7 +266,7 @@ def build_pipeline() -> list:
         },
 
         # ------------------------------------------------------------------
-        # Stage 8: Count frequency per (rawi_id, rel_type, related_rawi_id).
+        # Stage 9: Count frequency per (rawi_id, rel_type, related_rawi_id).
         # ------------------------------------------------------------------
         {
             "$group": {
@@ -262,7 +282,7 @@ def build_pipeline() -> list:
         },
 
         # ------------------------------------------------------------------
-        # Stage 9: Reassemble per narrator with teachers/students arrays.
+        # Stage 10: Reassemble per narrator with teachers/students arrays.
         # ------------------------------------------------------------------
         {
             "$group": {
@@ -298,7 +318,7 @@ def build_pipeline() -> list:
         },
 
         # ------------------------------------------------------------------
-        # Stage 10: Final reshape.
+        # Stage 11: Final reshape.
         # ------------------------------------------------------------------
         {
             "$project": {
@@ -311,7 +331,7 @@ def build_pipeline() -> list:
         },
 
         # ------------------------------------------------------------------
-        # Stage 11: Write output atomically.
+        # Stage 12: Write output atomically.
         # ------------------------------------------------------------------
         {"$out": TARGET_COLLECTION},
     ]

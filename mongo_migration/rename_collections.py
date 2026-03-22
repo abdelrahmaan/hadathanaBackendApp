@@ -28,15 +28,22 @@ DB_NAME = os.environ.get("DB_NAME", "HadithData")
 
 # (old_name, new_name)
 RENAMES = [
+    # Shamela (unchanged)
     ("bukhari_book",            "raw_shamela_books"),
     ("narrators",               "raw_shamela_narrators"),
     ("hadith_pages",            "raw_shamela_hadith_pages"),
     ("narrator_stats",          "analytics_narrator_stats_shamela"),
     ("analytics_narrator_stats", "analytics_narrator_stats_shamela"),
-    ("bukhari_book_podia",      "raw_podia_books"),
-    ("narrators_podia",         "raw_podia_narrators"),
-    ("narrators_tarajem_podia", "raw_podia_narrator_biographies"),
+    # Podia — legacy names → current names
+    ("bukhari_book_podia",      "processed_podia_books"),
+    ("narrators_podia",         "processed_podia_narrators"),
+    ("narrators_tarajem_podia", "processed_podia_narrator_biographies"),
     ("narrator_stats_podia",    "analytics_narrator_stats_podia"),
+    # Podia — v2 rename (raw_ prefix now means actual raw scrape data)
+    ("raw_podia_books",         "processed_podia_books"),
+    ("raw_podia_raw_books",     "raw_podia_books"),
+    ("raw_podia_narrators",     "processed_podia_narrators"),
+    ("raw_podia_narrator_biographies", "processed_podia_narrator_biographies"),
 ]
 
 

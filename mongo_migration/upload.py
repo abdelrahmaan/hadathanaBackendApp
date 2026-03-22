@@ -10,9 +10,10 @@ Collections (Shamela):
   raw_shamela_books        ← processed_bukhari_shamela/preprocessed_bukhari.jsonl
 
 Collections (Podia):
-  raw_podia_books                ← processed_bukhari_podia/bukhari_podia_hadiths.jsonl
-  raw_podia_narrators            ← processed_bukhari_podia/bukhari_podia_narrators.jsonl
-  raw_podia_narrator_biographies ← processed_bukhari_podia/narrators_tarajem.jsonl
+  processed_podia_books                ← processed_bukhari_podia/bukhari_podia_hadiths.jsonl
+  raw_podia_books                      ← processed_bukhari_podia/bukhari_podia_raw_hadiths.jsonl
+  processed_podia_narrators            ← processed_bukhari_podia/bukhari_podia_narrators.jsonl
+  processed_podia_narrator_biographies ← processed_bukhari_podia/narrators_tarajem.jsonl
 
 Usage:
     python mongo_migration/upload.py
@@ -52,9 +53,10 @@ SOURCES = [
     (_PROCESSED_SHAMELA / "narrators.jsonl",             "raw_shamela_narrators",    ("narrator_id",)),
     (_PROCESSED_SHAMELA / "preprocessed_bukhari.jsonl",  "raw_shamela_books",        ("source", "hadith_index")),
     # Podia sources
-    (_PROCESSED_PODIA / "bukhari_podia_hadiths.jsonl",   "raw_podia_books",                ("hadith_url",)),
-    (_PROCESSED_PODIA / "bukhari_podia_narrators.jsonl", "raw_podia_narrators",            ("rawi_id",)),
-    (_PROCESSED_PODIA / "narrators_tarajem.jsonl",       "raw_podia_narrator_biographies", ("rawi_id",)),
+    (_PROCESSED_PODIA / "bukhari_podia_hadiths.jsonl",     "processed_podia_books",                ("hadith_url",)),
+    (_PROCESSED_PODIA / "bukhari_podia_raw_hadiths.jsonl", "raw_podia_books",                      ("hadith_url",)),
+    (_PROCESSED_PODIA / "bukhari_podia_narrators.jsonl",   "processed_podia_narrators",            ("rawi_id",)),
+    (_PROCESSED_PODIA / "narrators_tarajem.jsonl",         "processed_podia_narrator_biographies", ("rawi_id",)),
 ]
 
 
