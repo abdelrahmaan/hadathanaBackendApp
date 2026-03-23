@@ -274,10 +274,10 @@ def build_pipeline() -> list:
                     "rawi_id": "$_id",
                     "rel_type": "$relations.rel_type",
                     "related_id": "$relations.rawi_id",
-                    "related_name": "$relations.name",
                 },
                 "hadith_count": {"$first": "$hadith_count"},
                 "freq": {"$sum": 1},
+                "related_name": {"$first": "$relations.name"},
             }
         },
 
@@ -294,7 +294,7 @@ def build_pipeline() -> list:
                             {"$eq": ["$_id.rel_type", "teacher"]},
                             {
                                 "rawi_id": "$_id.related_id",
-                                "name": "$_id.related_name",
+                                "name": "$related_name",
                                 "freq": "$freq",
                             },
                             "$$REMOVE",
@@ -307,7 +307,7 @@ def build_pipeline() -> list:
                             {"$eq": ["$_id.rel_type", "student"]},
                             {
                                 "rawi_id": "$_id.related_id",
-                                "name": "$_id.related_name",
+                                "name": "$related_name",
                                 "freq": "$freq",
                             },
                             "$$REMOVE",

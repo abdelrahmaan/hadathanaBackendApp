@@ -216,6 +216,13 @@
 
 ## Chore Log
 
+### Fix: deduplicate Podia narrator stats by rawi_id (2026-03-23)
+**Status**: done
+**Summary**: Stats endpoint returned duplicate teacher/student entries for the same rawi_id with different Arabic grammatical name forms. Fixed compute_stats.py Stage 9 to group by rawi_id only (not name), matching the Shamela pipeline pattern. Requires re-running compute_stats.py to regenerate the analytics collection.
+**Touched files**:
+- `mongo_migration/processed_bukhari_podia/compute_stats.py`
+- `tasks.md`
+
 ### Rename Podia collections: raw_ → processed_ for processed data, raw_ for actual raw scrape (2026-03-17)
 **Status**: Done
 **Summary**: Renamed Podia MongoDB collections so `raw_` consistently means unprocessed scrape data and `processed_` means pipeline-transformed data. `raw_podia_books` (was advanced extraction) → `processed_podia_books`. `raw_podia_raw_books` (was raw scrape) → `raw_podia_books`. `raw_podia_narrators` → `processed_podia_narrators`. `raw_podia_narrator_biographies` → `processed_podia_narrator_biographies`. Analytics collections unchanged.

@@ -286,10 +286,10 @@ def build_pipeline() -> list:
                     "narrator_id": "$_id",
                     "rel_type": "$relations.rel_type",
                     "related_id": "$relations.narrator_id",
-                    "related_name": "$relations.name",
                 },
                 "hadith_count": {"$first": "$hadith_count"},
                 "freq": {"$sum": 1},
+                "related_name": {"$first": "$relations.name"},
             }
         },
 
@@ -309,7 +309,7 @@ def build_pipeline() -> list:
                             {"$eq": ["$_id.rel_type", "teacher"]},
                             {
                                 "narrator_id": "$_id.related_id",
-                                "name": "$_id.related_name",
+                                "name": "$related_name",
                                 "freq": "$freq",
                             },
                             "$$REMOVE",
@@ -322,7 +322,7 @@ def build_pipeline() -> list:
                             {"$eq": ["$_id.rel_type", "student"]},
                             {
                                 "narrator_id": "$_id.related_id",
-                                "name": "$_id.related_name",
+                                "name": "$related_name",
                                 "freq": "$freq",
                             },
                             "$$REMOVE",
