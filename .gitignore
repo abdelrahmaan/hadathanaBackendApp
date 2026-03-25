@@ -83,3 +83,6 @@ mongo_migration/processed/
 debug_html_1681/
 debug_html_1681_missing/
 debug_html_1681_retry/
+
+# Rotating log files
+logs/
