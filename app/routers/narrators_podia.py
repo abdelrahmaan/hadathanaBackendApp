@@ -35,6 +35,19 @@ async def list_narrators(
     cursor = collection.find(query_filter).skip(skip).limit(limit)
     total = await collection.count_documents(query_filter)
 
+    active_filters = {k: v for k, v in {
+        "full_name_plain": full_name_plain,
+        "rank": rank,
+    }.items() if v is not None}
+    logger.info("search", extra={
+        "event": "search",
+        "endpoint": "/api/v2/narrators",
+        "filters": active_filters,
+        "skip": skip,
+        "limit": limit,
+        "total": total,
+    })
+
     items = []
     async for doc in cursor:
         doc_id = doc.get("_id")

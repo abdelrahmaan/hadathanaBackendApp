@@ -41,6 +41,21 @@ async def list_hadiths(
     cursor = collection.find(query_filter).skip(skip).limit(limit)
     total = await collection.count_documents(query_filter)
 
+    active_filters = {k: v for k, v in {
+        "hadith_text_plain": hadith_text_plain,
+        "rawi_id": rawi_id,
+        "book": book,
+        "hadith_index": hadith_index,
+    }.items() if v is not None}
+    logger.info("search", extra={
+        "event": "search",
+        "endpoint": "/api/v2/hadiths",
+        "filters": active_filters,
+        "skip": skip,
+        "limit": limit,
+        "total": total,
+    })
+
     items = []
     async for doc in cursor:
         doc_id = doc.get("_id")
