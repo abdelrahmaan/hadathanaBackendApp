@@ -445,6 +445,7 @@ curl http://localhost:8000/api/v2/narrators/822/stats
   "total": 1527 }
 
 // v1 NarratorStats
+// freq = number of distinct hadiths where this narrator-pair co-appears (not raw chain occurrences)
 { "narrator_id": 822, "hadith_count": 195,
   "teachers": [{ "narrator_id": 3320, "name": "أبو هريرة", "freq": 38 }],
   "students": [{ "narrator_id": 857,  "name": "أيوب",      "freq": 47 }] }
@@ -471,6 +472,7 @@ curl http://localhost:8000/api/v2/narrators/822/stats
   "tarajim": [{ "source": "...", "tarjama": "...", "tarjama_plain": "..." }] }
 
 // v2 PodiaNarratorStats
+// freq = number of distinct hadiths where this narrator-pair co-appears (not raw chain occurrences)
 { "rawi_id": 822, "hadith_count": 195,
   "teachers": [{ "rawi_id": 3320, "name": "أبو هريرة", "freq": 38 }],
   "students": [{ "rawi_id": 857,  "name": "أيوب",      "freq": 47 }] }

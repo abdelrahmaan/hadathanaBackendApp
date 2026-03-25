@@ -190,7 +190,7 @@
 - [ ] Deploy frontend to Vercel
 - [ ] Error tracking (Sentry or similar)
 - [ ] Performance monitoring and alerting
-- [ ] Logging infrastructure
+- [x] Logging infrastructure
 
 ---
 
@@ -215,6 +215,23 @@
 ---
 
 ## Chore Log
+
+### feat: structured JSON logging (2026-03-25)
+**Status**: Done
+**Summary**: Added structured JSON logging to the FastAPI app. Every HTTP request is logged with method, path, status code, and response time. Every list-endpoint search is logged with active filters and result count. Unhandled exceptions are caught in middleware, logged with full traceback, and return `{"detail": "Internal server error."}`. Logs write to `logs/app.log` (rotating, 10MB/5 backups) and stdout. 4 pytest tests added (TDD).
+**Touched files**:
+- `app/logging_config.py` (new)
+- `app/middleware.py` (new)
+- `app/main.py`
+- `app/routers/hadiths_shamela.py`
+- `app/routers/narrators_shamela.py`
+- `app/routers/hadiths_podia.py`
+- `app/routers/narrators_podia.py`
+- `requirements.txt`
+- `.gitignore`
+- `tests/__init__.py` (new)
+- `tests/conftest.py` (new)
+- `tests/test_logging.py` (new)
 
 ### Fix: deduplicate Podia narrator stats by rawi_id (2026-03-23)
 **Status**: done

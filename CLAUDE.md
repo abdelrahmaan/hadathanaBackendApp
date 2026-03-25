@@ -71,8 +71,8 @@ Podia pipeline (raw):
 - `raw_podia_books` - Podia hadiths (raw scrape — includes `full_name`, `rank`, `full_tooltip_info` per narrator; audit trail / fallback)
 
 Analytics:
-- `analytics_narrator_stats_shamela` - Shamela teacher/student statistics
-- `analytics_narrator_stats_podia` - Podia teacher/student statistics
+- `analytics_narrator_stats_shamela` - Shamela teacher/student statistics (`freq` = distinct hadiths where the pair co-appears, not raw chain occurrences)
+- `analytics_narrator_stats_podia` - Podia teacher/student statistics (`freq` = distinct hadiths where the pair co-appears, not raw chain occurrences)
 
 Future (not yet populated):
 - `canonical_books`, `canonical_hadiths`, `canonical_narrators`, `canonical_chains` (v1.2+)
