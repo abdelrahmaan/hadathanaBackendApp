@@ -39,3 +39,8 @@ def setup_logging() -> None:
     if not root.handlers:
         root.addHandler(file_handler)
         root.addHandler(stream_handler)
+
+    # Silence noisy third-party loggers
+    logging.getLogger("pymongo").setLevel(logging.WARNING)
+    logging.getLogger("motor").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
