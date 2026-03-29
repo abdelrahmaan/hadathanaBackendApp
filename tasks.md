@@ -160,7 +160,36 @@
 - [ ] Generate embeddings for hadith matn segments
 - [ ] Set up vector storage (MongoDB Atlas Vector Search or dedicated vector DB)
 - [ ] Implement hybrid search (keyword + semantic)
+- [ ] Add `GET /api/v2/hadiths/search/semantic?q=...` endpoint (returns results ranked by cosine similarity)
 - [ ] Integrate with FastAPI search endpoints
+
+---
+
+## v1.4 - Arabic Text Normalization & Advanced Search
+
+### Arabic Query Normalization (backend-only)
+- [ ] Implement `normalize_arabic_query(text)` utility: strip tashkeel, normalize alef variants (أ إ آ أ → ا), normalize ة → ه, normalize ى → ي, normalize hamzas (ؤ ئ → و ي), remove tatweel (ـ)
+- [ ] Apply normalization at query time on all search endpoints (`hadith_plain`, `name_plain`, `full_name_plain`)
+- [ ] Test: "أبو هريرة" and "ابوهريره" must return the same results
+- [ ] Affects: `app/routers/hadiths_shamela.py`, `app/routers/narrators_shamela.py`, `app/routers/hadiths_podia.py`, `app/routers/narrators_podia.py`
+
+### Advanced / Fuzzy Search
+- [ ] Evaluate options: MongoDB Atlas Search (Lucene-based), n-gram index, normalized token matching
+- [ ] Implement chosen approach for partial/fuzzy Arabic text matching
+- [ ] Replace or augment current `$regex` queries with the new search strategy
+- [ ] Affects all v1 & v2 hadith + narrator text search params
+
+### Hadith Topic Classification (offline pipeline)
+- [ ] Define topic taxonomy (e.g., صيام، صلاة، طهارة، نكاح، زكاة، حج، عقيدة، أخلاق)
+- [ ] Implement root-based or LLM-based classifier for hadith `matn_text` (Arabic morphology requires root matching — keyword lists alone are insufficient)
+- [ ] Run classification as offline pipeline step; store `topics: [...]` array in MongoDB documents
+- [ ] Add `GET /api/v2/hadiths?topic=صيام` filter endpoint
+- [ ] Write tests for the new `topic` filter param
+
+### Semantic Search (complements v1.3)
+- [ ] Prerequisite: v1.0 data quality (narrator coverage 75% → 95%) must be done first
+- [ ] Use `matn_text` from `processed_podia_books` as the embedding input (Shamela lacks matn segmentation)
+- [ ] Add rate limiting / response caching before exposing the endpoint (prerequisite from v2.0)
 
 ---
 
@@ -182,8 +211,14 @@
 ### Testing & CI/CD
 - [ ] Unit tests for API endpoints (pytest + httpx)
 - [ ] Integration tests with MongoDB test database
-- [ ] CI/CD pipeline (GitHub Actions)
-- [ ] Automated linting and type checking
+- [ ] CI/CD pipeline (GitHub Actions): run tests + linting on every PR, block merge to `main` if checks fail
+- [ ] Automated linting and type checking (ruff / mypy in CI)
+- [ ] Branch protection rule on `main`: require passing CI checks before merge
+
+### Auto Deployment
+- [ ] Auto-deploy on push to `main` (Railway / Render webhook or GitHub Actions deploy step)
+- [ ] Remove manual `tmux` restart workflow — deployment must be zero-touch
+- [ ] Health check after deploy to confirm the new version is live
 
 ### Deployment & Monitoring
 - [ ] Deploy backend to cloud (Railway / Render / AWS)
@@ -207,6 +242,7 @@
 | v1.1 | Data Enrichment | Not started |
 | v1.2 | Neo4j Graph Database | Not started |
 | v1.3 | Semantic Search | Not started |
+| v1.4 | Arabic Normalization & Advanced Search | Not started |
 | v2.0 | Production Release | Not started |
 
 **Current version**: v0.5 (all foundational work complete)
