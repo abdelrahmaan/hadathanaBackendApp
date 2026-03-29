@@ -504,6 +504,31 @@ CORS_ORIGINS=*
 
 ---
 
+## Data Snapshots (Cloudflare R2)
+
+Large datasets are stored in Cloudflare R2 instead of git. After cloning, pull the latest data with:
+
+```bash
+uv pip install boto3 python-dotenv tqdm   # one-time setup
+
+# List available snapshots
+uv run scripts/r2_sync/list_snapshots.py
+
+# Download the latest snapshot for a dataset
+uv run scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --latest
+
+# Upload a local folder as today's snapshot
+uv run scripts/r2_sync/push_snapshot.py --dataset bukhari_shamela --source data/
+```
+
+Snapshots are organized as `snapshots/<dataset>/<YYYY-MM-DD>/` in the R2 bucket. Downloaded files go to `data_snapshots/` (gitignored).
+
+Requires `R2_ENDPOINT_URL`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` in `.env` — see `.env.example`.
+
+Full docs: [scripts/r2_sync/README.md](scripts/r2_sync/README.md)
+
+---
+
 ## Troubleshooting
 
 **Auth error:** Check `docker inspect neo4j-hadith` for `NEO4J_AUTH` value — that's the real password.

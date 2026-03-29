@@ -313,6 +313,20 @@
 - `README.md`
 - `tasks.md`
 
+### Cloudflare R2 data sync tooling (2026-03-29)
+**Status**: Done
+**Summary**: Added Python scripts under `scripts/r2_sync/` to push/pull dataset snapshots to/from Cloudflare R2 (S3-compatible). Snapshots are stored under `snapshots/<dataset>/<YYYY-MM-DD>/`. Scripts use boto3 with multipart transfers (8 MB threshold), resume/retry on pull, tqdm progress bars. Added `data_snapshots/` to `.gitignore`, R2 env vars to `.env.example`, and usage docs.
+**Touched files**:
+- `scripts/r2_sync/config.py` (new — shared config, env validation, boto3 client factory)
+- `scripts/r2_sync/list_snapshots.py` (new — list datasets and snapshots)
+- `scripts/r2_sync/pull_snapshot.py` (new — download snapshots with resume/retry/progress)
+- `scripts/r2_sync/push_snapshot.py` (new — upload folders with multipart/progress)
+- `scripts/r2_sync/README.md` (new — full R2 usage docs and naming conventions)
+- `.env.example` (added R2 vars)
+- `.gitignore` (added `data_snapshots/`)
+- `README.md` (added Data Snapshots section)
+- `tasks.md`
+
 ### Rename analytics_narrator_stats → analytics_narrator_stats_shamela (2026-03-15)
 **Status**: Done
 **Summary**: Renamed `analytics_narrator_stats` to `analytics_narrator_stats_shamela` to be consistent with the `_shamela` suffix pattern used across all other Shamela collections.
