@@ -2,13 +2,15 @@
 """Download a dataset snapshot from Cloudflare R2 to local disk.
 
 Usage:
-    python scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --latest
-    python scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --date 2026-03-29
+    python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest
+    python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest --path extract_data_v2/playwrite/
+    python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest --path mongo_migration/processed_bukhari_podia/ --path extract_data_v2/playwrite/
 """
 
 import argparse
 import sys
 import time
+from fnmatch import fnmatch
 from pathlib import Path
 
 from config import (
@@ -56,6 +58,39 @@ def list_objects(client, bucket: str, prefix: str) -> list[dict]:
     return objects
 
 
+def filter_objects(objects: list[dict], snapshot_prefix: str, path_filters: list[str]) -> list[dict]:
+    """Filter objects by path prefixes or glob patterns.
+
+    Each filter can be:
+      - A directory prefix: "extract_data_v2/playwrite/" matches all files under it
+      - A file path: "extract_data_v2/playwrite/rawi_lookup.json" matches exactly
+      - A glob pattern: "*.csv" matches by filename pattern
+    """
+    filtered = []
+    for obj in objects:
+        relative = obj["Key"][len(snapshot_prefix):]
+        for pf in path_filters:
+            # Directory prefix match
+            if pf.endswith("/") and relative.startswith(pf):
+                filtered.append(obj)
+                break
+            # Exact file match
+            elif relative == pf:
+                filtered.append(obj)
+                break
+            # Glob pattern match (against full relative path and filename)
+            elif "*" in pf or "?" in pf:
+                filename = relative.rsplit("/", 1)[-1] if "/" in relative else relative
+                if fnmatch(relative, pf) or fnmatch(filename, pf):
+                    filtered.append(obj)
+                    break
+            # Prefix match without trailing slash (e.g. "mongo_migration/processed_bukhari_podia")
+            elif relative.startswith(pf + "/") or relative == pf:
+                filtered.append(obj)
+                break
+    return filtered
+
+
 def download_file(client, bucket: str, key: str, dest: Path, size: int) -> bool:
     """Download a single file with retry. Returns True on success."""
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -91,8 +126,9 @@ def format_size(nbytes: int) -> str:
     return f"{nbytes:.1f} TB"
 
 
-def pull_snapshot(client, bucket: str, dataset: str, date: str):
-    """Download all files for a dataset/date snapshot."""
+def pull_snapshot(client, bucket: str, dataset: str, date: str,
+                  path_filters: list[str] | None = None, dry_run: bool = False):
+    """Download files for a dataset/date snapshot, optionally filtered by path."""
     snapshot_prefix = f"{R2_PREFIX}{dataset}/{date}/"
     objects = list_objects(client, bucket, snapshot_prefix)
 
@@ -100,10 +136,24 @@ def pull_snapshot(client, bucket: str, dataset: str, date: str):
         print(f"No files found at r2://{bucket}/{snapshot_prefix}")
         sys.exit(1)
 
+    if path_filters:
+        objects = filter_objects(objects, snapshot_prefix, path_filters)
+        if not objects:
+            print(f"No files matched the path filter(s): {', '.join(path_filters)}")
+            print(f"Total files in snapshot: use --dry-run without --path to see all files.")
+            sys.exit(1)
+
     total_size = sum(o["Size"] for o in objects)
     dest_root = local_dir() / dataset / date
 
-    print(f"Downloading {len(objects)} files ({format_size(total_size)}) → {dest_root}")
+    print(f"{'[DRY RUN] ' if dry_run else ''}Downloading {len(objects)} files ({format_size(total_size)}) → {dest_root}")
+
+    if dry_run:
+        for obj in objects:
+            relative = obj["Key"][len(snapshot_prefix):]
+            print(f"  {relative} ({format_size(obj['Size'])})")
+        print(f"\nTotal: {len(objects)} files, {format_size(total_size)}")
+        return
 
     failed = []
     if HAS_TQDM:
@@ -139,13 +189,32 @@ def main():
         description="Download snapshots from Cloudflare R2.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Examples:\n"
-               "  python scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --latest\n"
-               "  python scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --date 2026-03-29\n",
+               "  # Pull entire snapshot\n"
+               "  python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest\n\n"
+               "  # Pull specific directories\n"
+               "  python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest \\\n"
+               "    --path extract_data_v2/playwrite/ \\\n"
+               "    --path mongo_migration/processed_bukhari_podia/\n\n"
+               "  # Pull a single file\n"
+               "  python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest \\\n"
+               "    --path extract_data_v2/playwrite/bukhari_pedia_advanced_extraction_results.json\n\n"
+               "  # Pull by glob pattern\n"
+               "  python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest --path '*.csv'\n\n"
+               "  # Dry run (list files without downloading)\n"
+               "  python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest --dry-run\n",
     )
     parser.add_argument("--dataset", required=True, help="Dataset name to download")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--latest", action="store_true", help="Download the latest snapshot")
     group.add_argument("--date", help="Specific snapshot date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--path", action="append", dest="paths",
+        help="Filter to specific paths/directories (can be repeated). Supports directory prefixes, exact files, and glob patterns.",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="List files that would be downloaded without actually downloading",
+    )
     args = parser.parse_args()
 
     client = get_s3_client()
@@ -160,7 +229,8 @@ def main():
     else:
         date = args.date
 
-    pull_snapshot(client, bucket, args.dataset, date)
+    pull_snapshot(client, bucket, args.dataset, date,
+                  path_filters=args.paths, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

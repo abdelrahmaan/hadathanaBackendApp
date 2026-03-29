@@ -58,15 +58,32 @@ python scripts/r2_sync/list_snapshots.py --dataset bukhari_shamela # specific da
 ### Download (pull) a snapshot
 
 ```bash
-# Download the latest snapshot for a dataset
-python scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --latest
+# Download the entire latest snapshot
+python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest
+
+# Download only specific directories (faster — skip what you don't need)
+python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest \
+  --path extract_data_v2/playwrite/ \
+  --path mongo_migration/processed_bukhari_podia/
+
+# Download a single file
+python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest \
+  --path extract_data_v2/playwrite/bukhari_pedia_advanced_extraction_results.json
+
+# Download by glob pattern
+python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest --path '*.csv'
+
+# Dry run — list what would be downloaded without downloading
+python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest --dry-run
+python scripts/r2_sync/pull_snapshot.py --dataset full_backup --latest --path extract_data_v2/playwrite/ --dry-run
 
 # Download a specific date
-python scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --date 2026-03-29
+python scripts/r2_sync/pull_snapshot.py --dataset full_backup --date 2026-03-29
 ```
 
 Files are saved to `data_snapshots/<dataset>/<date>/` (configurable via `R2_LOCAL_DIR`).
 
+- `--path` can be repeated to pull multiple directories/files in one command.
 - Existing files with matching size are skipped (resume support).
 - Failed downloads are retried up to 3 times.
 
