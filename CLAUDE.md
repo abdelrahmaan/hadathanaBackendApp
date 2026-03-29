@@ -173,6 +173,34 @@ docker stop neo4j-hadith
 # Clear database: MATCH (n) DETACH DELETE n;
 ```
 
+### R2 Data Sync (Cloudflare R2)
+
+Scripts in `scripts/r2_sync/` push/pull dataset snapshots to/from Cloudflare R2. Snapshots are stored as `snapshots/<dataset>/<YYYY-MM-DD>/` in the bucket.
+
+```bash
+# List available snapshots
+python scripts/r2_sync/list_snapshots.py
+
+# Download the latest snapshot for a dataset
+python scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --latest
+python scripts/r2_sync/pull_snapshot.py --dataset bukhari_podia --latest
+
+# Upload a folder as today's snapshot
+python scripts/r2_sync/push_snapshot.py --dataset bukhari_shamela --source data/
+
+# Upload only specific file types from the whole repo
+python scripts/r2_sync/push_snapshot.py --dataset full_backup --source . --extensions json,jsonl,csv,xlsx,parquet
+
+# Dry run (list files without uploading)
+python scripts/r2_sync/push_snapshot.py --dataset full_backup --source . --extensions json,jsonl --dry-run
+```
+
+Dataset naming: `bukhari_shamela`, `bukhari_podia`, `tarajm`. Downloaded files go to `data_snapshots/` (gitignored).
+
+Requires: `pip install boto3 python-dotenv tqdm` and R2 credentials in `.env`.
+
+Full docs: `scripts/r2_sync/README.md`
+
 ## Key Implementation Patterns
 
 ### API Endpoint Structure
@@ -215,6 +243,12 @@ CORS_ORIGINS=*
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
+
+# Cloudflare R2 (data snapshots — see scripts/r2_sync/README.md)
+R2_ENDPOINT_URL=https://<account_id>.r2.cloudflarestorage.com
+R2_BUCKET=hadathana_data
+R2_ACCESS_KEY_ID=<your_access_key>
+R2_SECRET_ACCESS_KEY=<your_secret_key>
 ```
 
 **Note**: Use `MONGODB_URI_READ` in production (follows principle of least privilege). See `app/config.py` for settings loading.
@@ -232,7 +266,9 @@ PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
 "$PYTHON" mongo_migration/upload.py
 ```
 
-## Data File Locations
+## Data Storage
+
+**All data files are stored in Cloudflare R2** (S3-compatible object storage), not in git. The repo `.gitignore` excludes all `.json`, `.jsonl`, `.csv`, `.xlsx`, and `.parquet` files under data directories. After cloning, pull data with the R2 sync scripts (see below).
 
 **Shamela input**:
 - `extract_data_v2/firecrawl/shamela_book_1681.jsonl` - raw hadiths
@@ -246,6 +282,9 @@ PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
 **Processed output** (ready for MongoDB):
 - `mongo_migration/processed_bukhari_shamela/*.jsonl`
 - `mongo_migration/processed_bukhari_podia/*.jsonl`
+
+**R2 snapshots** (downloaded via pull):
+- `data_snapshots/<dataset>/<YYYY-MM-DD>/` — gitignored, local only
 
 ## Testing API Endpoints
 

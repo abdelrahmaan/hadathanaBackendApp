@@ -351,7 +351,7 @@
 
 ### Cloudflare R2 data sync tooling (2026-03-29)
 **Status**: Done
-**Summary**: Added Python scripts under `scripts/r2_sync/` to push/pull dataset snapshots to/from Cloudflare R2 (S3-compatible). Snapshots are stored under `snapshots/<dataset>/<YYYY-MM-DD>/`. Scripts use boto3 with multipart transfers (8 MB threshold), resume/retry on pull, tqdm progress bars. Added `data_snapshots/` to `.gitignore`, R2 env vars to `.env.example`, and usage docs.
+**Summary**: Added Python scripts under `scripts/r2_sync/` to push/pull dataset snapshots to/from Cloudflare R2 (S3-compatible). All data files (`.json`, `.jsonl`, `.csv`, `.xlsx`, `.parquet`) are now stored in R2 instead of git. Snapshots are stored under `snapshots/<dataset>/<YYYY-MM-DD>/`. Scripts use boto3 with multipart transfers (8 MB threshold), resume/retry on pull, tqdm progress bars. Added `data_snapshots/` to `.gitignore`, R2 env vars to `.env.example`, and usage docs.
 **Touched files**:
 - `scripts/r2_sync/config.py` (new — shared config, env validation, boto3 client factory)
 - `scripts/r2_sync/list_snapshots.py` (new — list datasets and snapshots)
@@ -359,8 +359,9 @@
 - `scripts/r2_sync/push_snapshot.py` (new — upload folders with multipart/progress)
 - `scripts/r2_sync/README.md` (new — full R2 usage docs and naming conventions)
 - `.env.example` (added R2 vars)
-- `.gitignore` (added `data_snapshots/`)
+- `.gitignore` (added `data_snapshots/`, untracked data files)
 - `README.md` (added Data Snapshots section)
+- `CLAUDE.md` (added Data Storage section, R2 sync commands, R2 env vars)
 - `tasks.md`
 
 ### Rename analytics_narrator_stats → analytics_narrator_stats_shamela (2026-03-15)
