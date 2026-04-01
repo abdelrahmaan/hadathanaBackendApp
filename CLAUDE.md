@@ -258,6 +258,32 @@ Requires: `pip install boto3 python-dotenv tqdm` and R2 credentials in `.env`.
 
 Full docs: `scripts/r2_sync/README.md`
 
+### Offline Enrichment Scripts (JSONL-first, no MongoDB required)
+
+Two scripts enrich hadiths without any MongoDB dependency. They read the source JSONL directly and write slim output files to the repo root.
+
+| Script | Input | Output | Destination |
+|---|---|---|---|
+| `scripts/tag_topics_jsonl.py` | `bukhari_podia_hadiths.jsonl` | `hadith_topics.jsonl` | MongoDB (`mongoimport --mode=upsert`) |
+| `scripts/embed_matn_jsonl.py` | `bukhari_podia_hadiths.jsonl` | `hadith_embeddings.jsonl` | Qdrant / vector DB (deferred) |
+
+Both are **resumable** — re-running skips already-processed `hadith_url`s. Source JSONL is never modified.
+
+```bash
+# Run in tmux enrichment session (topics → embeddings, chained)
+tmux new-session -d -s enrichment
+tmux send-keys -t enrichment 'cd ~/Projects/hadathanaBackendApp && \
+  /home/abdo_kamar/Projects/.venv/bin/python scripts/tag_topics_jsonl.py && \
+  /home/abdo_kamar/Projects/.venv/bin/python scripts/embed_matn_jsonl.py' Enter
+
+# After topics finish — import into HadithDataDev
+docker exec -i mongodb-hadathana mongoimport --db HadithDataDev \
+  --collection processed_podia_books --mode=upsert --upsertFields=hadith_url \
+  < hadith_topics.jsonl
+```
+
+Requires `OPENROUTER_API_KEY` (topics) and `COHERE_API_KEY` (embeddings) in `.env`.
+
 ## Key Implementation Patterns
 
 ### API Endpoint Structure

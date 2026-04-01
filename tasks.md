@@ -252,6 +252,17 @@
 
 ## Chore Log
 
+### feat: JSONL-first topic tagging + matn embedding (2026-04-01)
+**Status**: done
+**Summary**: Two new offline enrichment scripts that read `bukhari_podia_hadiths.jsonl` directly (no MongoDB dependency). `scripts/tag_topics_jsonl.py` outputs slim `hadith_topics.jsonl` (`hadith_url` + `topics`) at repo root. `scripts/embed_matn_jsonl.py` outputs slim `hadith_embeddings.jsonl` (`hadith_url` + `matn_embedding`). Both are resumable by `hadith_url`, append-only, no merge back into source JSONL. Added `/*.jsonl` to `.gitignore` to cover root-level output files. Topics → import to MongoDB via `mongoimport --mode=upsert`. Embeddings → kept for Qdrant/vector DB (deferred).
+**Touched files**:
+- `scripts/tag_topics_jsonl.py` (new)
+- `scripts/embed_matn_jsonl.py` (new)
+- `.gitignore`
+- `tasks.md`
+
+
+
 ### chore: self-hosted MongoDB + dev/prod environment split (2026-04-01)
 **Status**: done
 **Summary**: Atlas cluster became unreachable (shard-00-00 DOWN, port 27017 blocked). Spun up local MongoDB 8 in Docker (`mongodb-hadathana` container, volume `mongodb_hadathana_data`). Imported all collections into both `HadithData` (Atlas mirror) and `HadithDataDev` (dev DB). Added `APP_ENV` env var — `dev` routes to local Docker + `HadithDataDev`, `prod` routes to Atlas + `HadithData`. Config auto-switches URI, DB name, port, and CORS origins based on `APP_ENV`. Fixed `PodiaNarratorTarajem` and related models — `_plain`/`_clean` fields made optional since local JSONL files lack those preprocessing-derived fields. Ran `compute_stats.py` to populate `analytics_narrator_stats_podia` locally (stats are computed, not stored in JSONL). Production runs in `tmux hadathana_deployment` on port 8000.
