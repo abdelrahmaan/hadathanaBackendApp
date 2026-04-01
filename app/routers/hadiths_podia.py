@@ -22,6 +22,7 @@ async def list_hadiths(
     rawi_id: int | None = Query(default=None),
     book: str | None = Query(default=None),
     hadith_index: int | None = Query(default=None),
+    topic: str | None = Query(default=None),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
 ):
@@ -34,6 +35,8 @@ async def list_hadiths(
         query_filter["book"] = {"$regex": book, "$options": "i"}
     if hadith_index is not None:
         query_filter["hadith_indices"] = hadith_index
+    if topic:
+        query_filter["topics"] = {"$regex": topic, "$options": "i"}
 
     db = get_db(get_client())
     collection = get_podia_hadiths_collection(db)
@@ -46,6 +49,7 @@ async def list_hadiths(
         "rawi_id": rawi_id,
         "book": book,
         "hadith_index": hadith_index,
+        "topic": topic,
     }.items() if v is not None}
     logger.info("search", extra={
         "event": "search",

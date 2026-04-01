@@ -56,8 +56,8 @@ errors_*.json
 results.json
 
 # ---------------------------------------------------------------
-# Large data files — stored in Cloudflare R2, not in git
-# See scripts/r2_sync/README.md for push/pull workflow
+# Large data files — stored in Cloudflare R2, not in git.
+# See scripts/r2_sync/README.md for push/pull workflow.
 # ---------------------------------------------------------------
 
 # Data directory (local datasets, exports, graphs)

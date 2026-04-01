@@ -9,7 +9,7 @@ def get_client() -> AsyncIOMotorClient:
 
 
 def get_db(client: AsyncIOMotorClient):
-    return client[settings.db_name]
+    return client[settings.get_db_name()]
 
 
 def get_hadiths_collection(db):
@@ -50,7 +50,7 @@ def get_podia_narrators_tarajem_collection(db):
 
 async def connect():
     global _client
-    _client = AsyncIOMotorClient(settings.mongodb_uri_read)
+    _client = AsyncIOMotorClient(settings.get_mongodb_uri())
 
 
 async def disconnect():
