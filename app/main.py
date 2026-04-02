@@ -10,7 +10,7 @@ from .config import settings
 from .database import connect, disconnect
 from .logging_config import setup_logging
 from .middleware import RequestLoggingMiddleware
-from .routers import hadiths_shamela, narrators_shamela, hadiths_podia, narrators_podia
+from .routers import hadiths_shamela, narrators_shamela, hadiths_podia, narrators_podia, search_podia
 
 setup_logging()
 
@@ -42,6 +42,7 @@ app.include_router(hadiths_shamela.router)
 app.include_router(narrators_shamela.router)
 app.include_router(hadiths_podia.router)
 app.include_router(narrators_podia.router)
+app.include_router(search_podia.router)
 
 
 @app.exception_handler(Exception)

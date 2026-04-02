@@ -180,11 +180,11 @@
 - [ ] Affects all v1 & v2 hadith + narrator text search params
 
 ### Hadith Topic Classification (offline pipeline)
-- [ ] Define topic taxonomy (e.g., صيام، صلاة، طهارة، نكاح، زكاة، حج، عقيدة، أخلاق)
-- [ ] Implement root-based or LLM-based classifier for hadith `matn_text` (Arabic morphology requires root matching — keyword lists alone are insufficient)
-- [ ] Run classification as offline pipeline step; store `topics: [...]` array in MongoDB documents
-- [ ] Add `GET /api/v2/hadiths?topic=صيام` filter endpoint
-- [ ] Write tests for the new `topic` filter param
+- [x] Define topic taxonomy (47 Arabic topic tags, e.g., الصلاة، الصوم، العقيدة والتوحيد، الأخلاق والآداب)
+- [x] Implement LLM-based classifier for hadith `matn_text` (Gemini Flash via OpenRouter) — `scripts/tag_topics_jsonl.py`
+- [x] Run classification as offline pipeline step; store `topics: [...]` array in `processed_podia_books` — 7,075/7,076 hadiths tagged
+- [x] Add `GET /api/v2/hadiths?topic=صيام` filter endpoint
+- [x] Add `GET /api/v2/topics` endpoint (all topics with counts)
 
 ### Semantic Search (complements v1.3)
 - [ ] Prerequisite: v1.0 data quality (narrator coverage 75% → 95%) must be done first
@@ -242,7 +242,7 @@
 | v1.1 | Data Enrichment | Not started |
 | v1.2 | Neo4j Graph Database | Not started |
 | v1.3 | Semantic Search | Not started |
-| v1.4 | Arabic Normalization & Advanced Search | Not started |
+| v1.4 | Arabic Normalization & Advanced Search | In progress (topic classification done) |
 | v2.0 | Production Release | Not started |
 
 **Current version**: v0.5 (all foundational work complete)
@@ -251,6 +251,65 @@
 ---
 
 ## Chore Log
+
+### fix: restore HadithDataDev after mongoimport upsert wiped hadith data (2026-04-02)
+**Status**: done
+**Summary**: `mongoimport --mode=upsert` on `hadith_topics.jsonl` replaced entire documents in `processed_podia_books` with slim `{hadith_url, topics}` records, destroying all hadith fields. Fixed by: (1) dropping the broken collection, (2) re-importing full `bukhari_podia_hadiths.jsonl`, (3) applying topics via PyMongo `bulk_write` with `$set` updates (merges field, does not replace document). Updated README to warn against `mongoimport --mode=upsert` for partial field updates. Confirmed Atlas (prod) was unaffected — topics were already present.
+**Touched files**:
+- `README.md` (replaced unsafe `mongoimport --mode=upsert` instructions with `$set` bulk write)
+- `tasks.md`
+
+### feat: JSONL-first topic tagging + matn embedding (2026-04-01)
+**Status**: done
+**Summary**: Two new offline enrichment scripts that read `bukhari_podia_hadiths.jsonl` directly (no MongoDB dependency). `scripts/tag_topics_jsonl.py` outputs slim `hadith_topics.jsonl` (`hadith_url` + `topics`) at repo root. `scripts/embed_matn_jsonl.py` outputs slim `hadith_embeddings.jsonl` (`hadith_url` + `matn_embedding`). Both are resumable by `hadith_url`, append-only, no merge back into source JSONL. Added `/*.jsonl` to `.gitignore` to cover root-level output files. Topics → import to MongoDB via `mongoimport --mode=upsert`. Embeddings → kept for Qdrant/vector DB (deferred).
+**Touched files**:
+- `scripts/tag_topics_jsonl.py` (new)
+- `scripts/embed_matn_jsonl.py` (new)
+- `.gitignore`
+- `tasks.md`
+
+
+
+### chore: self-hosted MongoDB + dev/prod environment split (2026-04-01)
+**Status**: done
+**Summary**: Atlas cluster became unreachable (shard-00-00 DOWN, port 27017 blocked). Spun up local MongoDB 8 in Docker (`mongodb-hadathana` container, volume `mongodb_hadathana_data`). Imported all collections into both `HadithData` (Atlas mirror) and `HadithDataDev` (dev DB). Added `APP_ENV` env var — `dev` routes to local Docker + `HadithDataDev`, `prod` routes to Atlas + `HadithData`. Config auto-switches URI, DB name, port, and CORS origins based on `APP_ENV`. Fixed `PodiaNarratorTarajem` and related models — `_plain`/`_clean` fields made optional since local JSONL files lack those preprocessing-derived fields. Ran `compute_stats.py` to populate `analytics_narrator_stats_podia` locally (stats are computed, not stored in JSONL). Production runs in `tmux hadathana_deployment` on port 8000.
+**Touched files**:
+- `app/config.py`
+- `app/database.py`
+- `app/models/narrator_podia.py`
+- `.env` (added `APP_ENV`, `MONGODB_URI_LOCAL`, `DB_NAME_DEV`)
+- `.env.example`
+- `CLAUDE.md`
+- `tasks.md`
+
+### feat: topic listing and topic-filtered hadith endpoints (2026-03-31)
+**Status**: done
+**Summary**: Added `GET /api/v2/topics` (all distinct topics with counts) and `GET /api/v2/topics/{topic}/hadiths` (paginated hadiths by exact topic). New router `app/routers/search_podia.py`. Added `TopicCount` and `TopicsResponse` Pydantic models.
+**Touched files**:
+- `app/routers/search_podia.py` (new)
+- `app/models/hadith_podia.py`
+- `app/main.py`
+- `tasks.md`
+
+### feat: matn embedding + topic tagging (2026-03-30)
+**Status**: done
+**Summary**: Added `matn_embedding` (Cohere embed-v4, 1536-dim float32) and `topics` (1-3 Arabic semantic tags via Gemini Flash) to `processed_podia_books`. Offline script `scripts/embed_matn.py` uses LangChain (langchain-cohere for embeddings, langchain-openai for LLM via OpenRouter). Resumable, batched (96 embed / 20 LLM), exponential backoff. Also adds `?topic=` regex filter to `GET /api/v2/hadiths`. Run `python mongo_migration/create_indexes.py` after embedding to add the topics B-tree index; create the Atlas Vector Search index manually (instructions printed at end of script run).
+**Touched files**:
+- `scripts/embed_matn.py` (new)
+- `requirements.txt`
+- `.env.example`
+- `mongo_migration/create_indexes.py`
+- `app/models/hadith_podia.py`
+- `app/routers/hadiths_podia.py`
+- `tasks.md`
+
+### fix: detect and patch duplicate rawi_id in advanced extraction data (2026-03-29)
+**Status**: in_progress
+**Summary**: Two different narrators (نافع and ابن عمر) share rawi_id=1568 in hadith 468 in `bukhari_pedia_advanced_extraction_results.json`. Writing a detection script to find all such conflicts, then patching the source JSON and re-running preprocessing.
+**Touched files**:
+- `scripts/detect_rawi_id_conflicts.py` (new)
+- `bukhari_pedia_advanced_extraction_results.json` (data patch)
+- `tasks.md`
 
 ### feat: structured JSON logging (2026-03-25)
 **Status**: Done
@@ -347,6 +406,15 @@
 **Summary**: Updated README.md to reflect current MongoDB collection names (`analytics_narrator_stats_shamela`, `raw_shamela_*`, `raw_podia_*`), corrected env var from `MONGODB_URI` to `MONGODB_URI_READ`, and replaced stale pipeline steps with the current two-pipeline structure.
 **Touched files**:
 - `README.md`
+- `tasks.md`
+
+### chore: data change detection via git intent-to-add (2026-03-29)
+**Status**: Done
+**Summary**: Registered pulled data files (`mongo_migration/processed_bukhari_podia/*.jsonl`, `extract_data_v2/playwrite/*.jsonl`) with `git add --intent-to-add --force` so `git status` shows data changes without ever committing them. `.gitignore` still blocks staging. Workflow: `git status` to detect changes → `push_snapshot.py` if data changed → `git commit` for code only. Updated CLAUDE.md and scripts/r2_sync/README.md with the workflow.
+**Touched files**:
+- `.git/info/exclude` (cleaned — patterns stay in `.gitignore`)
+- `CLAUDE.md` (added Change detection workflow section)
+- `scripts/r2_sync/README.md` (added Change Detection Workflow section)
 - `tasks.md`
 
 ### Cloudflare R2 data sync tooling (2026-03-29)

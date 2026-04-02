@@ -39,10 +39,21 @@ class PodiaHadith(BaseModel):
     matn_text: str
     matn_text_plain: str
     tawabi_text: str | None = None
+    topics: list[str] = []
     chains: list[PodiaChain]
     narrators: list[PodiaHadithNarrator]
 
 
 class PaginatedPodiaHadiths(BaseModel):
     items: list[PodiaHadith]
+    total: int
+
+
+class TopicCount(BaseModel):
+    topic: str
+    count: int
+
+
+class TopicsResponse(BaseModel):
+    items: list[TopicCount]
     total: int

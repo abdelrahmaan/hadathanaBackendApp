@@ -120,7 +120,32 @@ Add new dataset names as needed — the scripts accept any string.
 | `R2_PREFIX` | No | `snapshots/` | Key prefix in bucket |
 | `R2_LOCAL_DIR` | No | `data_snapshots/` | Local download directory |
 
+## Change Detection Workflow
+
+Data files are registered with git via `git add --intent-to-add --force` so `git status` shows modifications — but `.gitignore` prevents them from ever being staged or committed. This gives you a free "what changed" signal without any extra tooling.
+
+```bash
+# See what changed (data + code in one view)
+git status
+# M mongo_migration/processed_bukhari_podia/bukhari_podia_hadiths.jsonl  ← data changed
+# M app/routers/hadiths_podia.py                                          ← code changed
+
+# Data changed → push to R2
+python scripts/r2_sync/push_snapshot.py --dataset bukhari_podia \
+  --source mongo_migration/processed_bukhari_podia/ --extensions jsonl
+
+# Code changed → commit normally (data is blocked by .gitignore, safe to git add .)
+git add app/ && git commit -m "feat: ..."
+```
+
+To register newly pulled files for tracking (run once after each pull):
+```bash
+git add --intent-to-add --force mongo_migration/processed_bukhari_podia/*.jsonl
+git add --intent-to-add --force extract_data_v2/playwrite/*.jsonl
+```
+
 ## Notes
 
 - `data_snapshots/` is in `.gitignore` — never commit downloaded data.
 - Credentials load from `.env` at runtime — never hardcode them.
+- Data files tracked with `--intent-to-add` show in `git status` but can never be committed — `.gitignore` blocks staging.

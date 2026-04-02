@@ -1,264 +1,75 @@
-# Hadith Narrator Graph
+# Hadathana API
 
-A knowledge graph of Sahih Al-Bukhari narrator chains built from shamela.ws data, queryable via Neo4j. Designed to power a natural-language chatbot that converts user questions into Cypher queries.
+FastAPI + MongoDB backend for the Hadathana Islamic hadith app. Exposes Sahih al-Bukhari data from two independent pipelines (Shamela and Podia) with narrator chain analysis.
+
+---
 
 ## Quick Start
 
 ```bash
-# 1. Activate virtualenv
-source backend/venv/bin/activate
+PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 
-# 2. Start Neo4j
-docker start neo4j-hadith
-
-# 3. Build the graph
-python extract_data_v2/build_graph.py
-
-# 4. Verify in Neo4j Browser
-# Open http://localhost:7474
-```
-
----
-
-## Data Pipeline (Current — V3 Shamela)
-
-Raw data is scraped directly from shamela.ws. No LLM extraction needed — narrator IDs come from shamela itself.
-
-```
-shamela_book_1681.jsonl          shamela_narrators.jsonl     narrator_hadith_names.json
-(7,230 hadiths + chains)    +    (1,527 narrator bios)   +   (1,525 name variant lists)
-         │                                 │                            │
-         └─────────────────────────────────┴────────────────────────────┘
-                                           │
-                                   build_graph.py
-                                           │
-                                    Neo4j Graph (V3)
-                     ┌──────────────────────────────────────────┐
-                     │  Book → Chapter → Hadith                 │
-                     │  Narrator → Narrator → Hadith            │
-                     └──────────────────────────────────────────┘
-```
-
-### Run ingestion
-
-```bash
-source backend/venv/bin/activate
-
-# Dry run (no writes, prints stats)
-python extract_data_v2/build_graph.py --dry-run
-
-# Full ingestion (reads credentials from .env)
-python extract_data_v2/build_graph.py
-```
-
-Credentials are loaded from `.env` automatically (`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`).
-
-### Re-ingest from scratch
-
-```bash
-# Clear the database first in Neo4j Browser:
-# MATCH (n) DETACH DELETE n;
-# Then re-run:
-python extract_data_v2/build_graph.py
-```
-
----
-
-## Graph Schema (V3)
-
-### Nodes
-
-| Label | Key | Main Properties |
-|---|---|---|
-| `Book` | `section_id` | `book_id`, `name` |
-| `Chapter` | `section_id` | `book_id`, `name` |
-| `Hadith` | `hadith_id` (`"1681_{page}"`) | `page_number`, `book_id`, `full_text`, `matn` |
-| `Narrator` | `narrator_id` (shamela int) | `name`, `kunya`, `nasab`, `tabaqa`, `rank_ibn_hajar`, `rank_dhahabi`, `death_date`, `original_names[]` |
-
-### Relationships
-
-| Type | Direction | Properties |
-|---|---|---|
-| `IN_CHAPTER` | Hadith → Chapter | — |
-| `IN_BOOK` | Chapter → Book | — |
-| `NARRATED` | Narrator → Narrator | `position`, `hadith_id` |
-| `TRANSMITTED_HADITH` | Narrator → Hadith | `position` |
-
-**Chain convention:** `narrators[0]` is the collector (البخاري), `narrators[-1]` is closest to the Prophet ﷺ. `NARRATED` links go left→right. The last narrator has a `TRANSMITTED_HADITH` edge to the Hadith node.
-
-Full schema for chatbot integration: [extract_data_v2/schema_description.md](extract_data_v2/schema_description.md)
-
----
-
-## Querying
-
-Open Neo4j Browser at [http://localhost:7474](http://localhost:7474) (`neo4j` / `password`).
-
-See [queries.cypher](queries.cypher) for the full query library. Quick examples:
-
-```cypher
-// Node counts
-MATCH (b:Book) RETURN count(b);
-MATCH (c:Chapter) RETURN count(c);
-MATCH (h:Hadith) RETURN count(h);
-MATCH (n:Narrator) RETURN count(n);
-
-// Full chain for a hadith
-MATCH (n:Narrator)-[:NARRATED*]->(last:Narrator)-[:TRANSMITTED_HADITH]->(h:Hadith {hadith_id:'1681_11'})
-RETURN n.name, last.name, h.matn;
-
-// Most frequent narrators
-MATCH (n:Narrator)-[:NARRATED|TRANSMITTED_HADITH]->()
-RETURN n.name, count(*) AS freq ORDER BY freq DESC LIMIT 10;
-```
-
----
-
-## Docker
-
-### Run the API locally with Docker
-
-```bash
-# Build the image
-docker build -t hadathna-api .
-
-# Run (pass env vars at runtime, never bake them into the image)
-docker run -p 8000:8000 \
-  -e MONGODB_URI_READ="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/" \
-  -e DB_NAME="HadithData" \
-  -e CORS_ORIGINS="*" \
-  hadathna-api
-```
-
-API available at http://localhost:8000 — health check: http://localhost:8000/health
-
-### Neo4j container (legacy graph pipeline only)
-
-```bash
-# Create container (first time)
-docker run -d \
-  --name neo4j-hadith \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/password \
-  neo4j:latest
-
-# Daily use
-docker start neo4j-hadith
-docker stop neo4j-hadith
-docker logs neo4j-hadith
-```
-
----
-
-## Web Application
-
-The project includes a Next.js frontend and FastAPI backend.
-
-```bash
-# Terminal 1 — Neo4j
-docker start neo4j-hadith
-
-# Terminal 2 — FastAPI backend
-cd backend
-source venv/bin/activate
-uvicorn main:app --reload --port 8000
-
-# Terminal 3 — Next.js frontend
-cd frontend
-npm run dev
-```
-
-Frontend: [http://localhost:3000](http://localhost:3000) — Backend: [http://localhost:8000](http://localhost:8000)
-
----
-
-## File Structure
-
-```
-hadith_graph/
-├── extract_data_v2/
-│   ├── build_graph.py                  # ← V3 ingestion script (current)
-│   ├── schema_description.md           # ← Schema for chatbot system prompt
-│   ├── firecrawl/
-│   │   ├── shamela_book_1681.jsonl     # 7,230 hadiths (raw scrape)
-│   │   ├── shamela_narrators.jsonl     # 1,527 narrator biographies
-│   │   ├── narrator_hadith_names.json       # 1,525 narrator → name variants
-│   │   ├── enrich_narrator_ids.py          # Phase 1: exact name match → narrator IDs (68% coverage)
-│   │   ├── resolve_remaining_narrators.py  # Phase 2: Shamela + context rules → 88% coverage
-│   │   ├── bukhari_narrator_coverage.py    # generates per-narrator bio report for Bukhari V2
-│   │   └── bukhari_narrator_coverage.jsonl # output: 1,305 narrators with bio fields
-│   ├── Bukhari/
-│   │   ├── Bukhari_Without_Tashkel_results_advanced_with_matn.json        # V2 LLM-extracted hadith chains (no tashkeel)
-│   │   ├── Bukhari_Without_Tashkel_results_advanced_with_matn_with_ids.json  # ← enriched with narrator IDs
-│   │   ├── narrator_hadith_names_bukhari.json  # narrator_id → name variants seen in Bukhari chains (1,366 IDs)
-│   │   ├── covered_narrators.csv               # 1,366 resolved narrators: ID, canonical name, name forms, role, method, sample hadith indices
-│   │   └── uncovered_narrators.csv             # 699 unresolved narrator names: name, role, occurrences, sample hadith indices
-│
-├── backend/
-│   └── main.py                         # FastAPI server
-├── frontend/                           # Next.js app
-│
-├── queries.cypher                      # Cypher query examples (V3 schema)
-├── requirements.txt                    # Python dependencies
-└── .env                                # Credentials (gitignored)
-```
-
-**Legacy scripts** (V1/V2 LLM-based pipeline — kept for reference):
-`langExtract.py`, `ingest.py`, `extract_chains.py`, `normalization.py`, `neo4j_client.py`
-
----
-
-## Environment Variables (.env)
-
-```bash
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=password
-```
-
----
-
-## hadathana-api (FastAPI + MongoDB)
-
-FastAPI backend for the Hadathana Islamic app — exposes the REST API consumed by the frontend.
-
-### Setup
-
-```bash
-# 1. Create and activate venv
-python -m venv venv && source venv/bin/activate
-
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Copy env template and fill in credentials
+# 1. Copy env template and fill in credentials
 cp .env.example .env
 
-# 4. Run dev server
-uvicorn app.main:app --reload
+# 2. Start local MongoDB (Docker)
+docker start mongodb-hadathana   # or: docker run -d --name mongodb-hadathana -p 27017:27017 -v mongodb_hadathana_data:/data/db mongo:8
+
+# 3. Run dev server (APP_ENV=dev in .env)
+"$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-API docs: http://localhost:8000/docs
+API docs: http://localhost:8001/docs
 
-### Deploy to Railway / Render
+---
 
-1. Push the repo to GitHub
-2. Create a new project on [Railway](https://railway.app) or [Render](https://render.com) and connect the repo
-3. Set environment variables in the platform dashboard:
-   ```
-   MONGODB_URI_READ=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
-   DB_NAME=HadithData
-   CORS_ORIGINS=*
-   ```
-4. In MongoDB Atlas → **Network Access** → allow `0.0.0.0/0` (or the platform's IP range)
-5. The platform will auto-detect the `Dockerfile` and deploy
+## Environments
 
-### Populate the database
+Two environments controlled by `APP_ENV` in `.env`:
 
-Before the API returns data, run the migration pipeline:
+| `APP_ENV` | MongoDB | Database | Port | CORS |
+|---|---|---|---|---|
+| `dev` | Local Docker (`mongodb://localhost:27017/`) | `HadithDataDev` | 8001 | localhost |
+| `prod` | Atlas cloud (`MONGODB_URI_READ`) | `HadithData` | 8000 | hadathana.app |
+
+**Production runs in `tmux hadathana_deployment`** on port 8000. Never restart it without verifying `APP_ENV=prod`.
+
+---
+
+## Setup — Local MongoDB
 
 ```bash
-PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
+# Start container
+docker start mongodb-hadathana
+
+# Bootstrap a database (run for both HadithData and HadithDataDev)
+DB=HadithDataDev
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_books \
+  < mongo_migration/processed_bukhari_podia/bukhari_podia_hadiths.jsonl
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_narrators \
+  < mongo_migration/processed_bukhari_podia/bukhari_podia_narrators.jsonl
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_narrator_biographies \
+  < mongo_migration/processed_bukhari_podia/bukhari_narrators_tarajem.jsonl
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection raw_shamela_books \
+  < mongo_migration/processed_bukhari_shamela/preprocessed_bukhari.jsonl
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection raw_shamela_narrators \
+  < mongo_migration/processed_bukhari_shamela/narrators.jsonl
+
+# Create indexes
+MONGODB_URI_READ_WRITE=mongodb://localhost:27017/ DB_NAME=$DB \
+  python mongo_migration/create_indexes.py
+
+# Compute narrator stats (not in JSONL — must be derived)
+MONGODB_URI_READ_WRITE=mongodb://localhost:27017/ DB_NAME=$DB \
+  python mongo_migration/processed_bukhari_podia/compute_stats.py
+```
+
+---
+
+## Populate Atlas (Production)
+
+```bash
+PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 
 # Shamela pipeline
 "$PYTHON" mongo_migration/processed_bukhari_shamela/preprocess_pages.py
@@ -274,16 +85,15 @@ PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
 "$PYTHON" mongo_migration/processed_bukhari_podia/compute_stats.py
 ```
 
-This populates the following collections:
+Collections populated:
+- **Shamela**: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats_shamela`
+- **Podia**: `processed_podia_books`, `raw_podia_books`, `processed_podia_narrators`, `processed_podia_narrator_biographies`, `analytics_narrator_stats_podia`
 
-**Shamela**: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats_shamela`
-**Podia**: `processed_podia_books`, `raw_podia_books`, `processed_podia_narrators`, `processed_podia_narrator_biographies`, `analytics_narrator_stats_podia`
+---
 
-`compute_narrator_stats.py` is idempotent — re-run it any time after new hadiths are added.
+## Endpoints
 
-### Endpoints
-
-#### v1 — Shamela
+### v1 — Shamela
 
 | Method | Path | Query params | Response |
 |--------|------|-------------|----------|
@@ -292,247 +102,264 @@ This populates the following collections:
 | GET | `/api/v1/narrators` | `name_plain`, `kunya`, `nasab`, `skip`, `limit` | `PaginatedNarrators` |
 | GET | `/api/v1/narrators/{narrator_id}` | — | `Narrator` |
 | GET | `/api/v1/narrators/{narrator_id}/stats` | — | `NarratorStats` |
-| GET | `/health` | — | `{ "status": "ok" }` |
 
-#### v2 — Podia
+### v2 — Podia
 
 | Method | Path | Query params | Response |
 |--------|------|-------------|----------|
-| GET | `/api/v2/hadiths` | `hadith_text_plain`, `rawi_id`, `book`, `hadith_index`, `skip`, `limit` | `PaginatedPodiaHadiths` |
+| GET | `/api/v2/hadiths` | `hadith_text_plain`, `rawi_id`, `book`, `topic`, `skip`, `limit` | `PaginatedPodiaHadiths` |
 | GET | `/api/v2/hadiths/{hadith_index}` | — | `PodiaHadith` |
 | GET | `/api/v2/narrators` | `full_name_plain`, `rank`, `skip`, `limit` | `PaginatedPodiaNarrators` |
 | GET | `/api/v2/narrators/{rawi_id}` | — | `PodiaNarrator` |
 | GET | `/api/v2/narrators/{rawi_id}/tarajem` | — | `PodiaNarratorTarajem` |
 | GET | `/api/v2/narrators/{rawi_id}/stats` | — | `PodiaNarratorStats` |
+| GET | `/api/v2/topics` | — | `TopicsResponse` |
+| GET | `/api/v2/topics/{topic}/hadiths` | `skip`, `limit` | `PaginatedPodiaHadiths` |
+| GET | `/health` | — | `{ "status": "ok" }` |
 
 ---
 
-### Data Field Comparison
-
-#### Hadith fields
-
-| Field | v1 Shamela | v2 Podia | Notes |
-|-------|:---:|:---:|-------|
-| `id` | ✅ | ✅ | MongoDB ObjectId as string |
-| `hadith_index` / `hadith_indices` | ✅ single int | ✅ list of ints | Podia hadiths can span multiple indices |
-| `source` | ✅ | ✅ | |
-| `hadith` / `hadith_text` | ✅ | ✅ | Full text with tashkeel |
-| `hadith_plain` / `hadith_text_plain` | ✅ | ✅ | Tashkeel stripped, for search |
-| `book` | ❌ | ✅ | |
-| `chapter` | ❌ | ✅ | |
-| `hadith_url` | ❌ | ✅ | Source URL |
-| `matn_plain` | ✅ list | ❌ | Matn segments (Shamela only) |
-| `n_matn` | ✅ | ❌ | Count of matn segments |
-| `n_chains` | ✅ | ❌ | Count of chains |
-| `chains[]` | ✅ | ❌ | Typed chain structure (primary/nested/follow_up) |
-| `unique_narrators[]` | ✅ | ❌ | Deduped narrator list |
-| `narrators[]` | ❌ | ✅ | Per-hadith narrator list with rank |
-
-#### Narrator fields
-
-| Field | v1 Shamela | v2 Podia | Notes |
-|-------|:---:|:---:|-------|
-| `id` | ✅ | ✅ | MongoDB ObjectId as string |
-| `narrator_id` / `rawi_id` | ✅ | ✅ | Integer narrator ID |
-| `name` / `name_in_chain` | ✅ | ✅ | Name as it appears in chain |
-| `name_plain` / `name_in_chain_plain` | ✅ | ✅ | Tashkeel stripped |
-| `full_name` | ❌ | ✅ | |
-| `full_name_plain` | ❌ | ✅ | |
-| `rank` | ❌ | ✅ | |
-| `rank_plain` | ❌ | ✅ | |
-| `full_tooltip_info` | ❌ | ✅ | Raw tooltip text from source |
-| `kunya` | ✅ | ❌ | |
-| `nasab` | ✅ | ❌ | |
-| `tabaqa` | ✅ | ❌ | Generation/layer |
-| `rank_ibn_hajar` | ✅ | ❌ | Individual scholar ranking |
-| `rank_dhahabi` | ✅ | ❌ | Individual scholar ranking |
-| `relations` | ✅ | ❌ | |
-| `jarh_wa_tadil[]` | ✅ | ❌ | Available in v2 via `/tarajem` |
-| `death_date` | ✅ | ❌ | Available in v2 via `/tarajem` |
-
-#### Narrator stats (same structure in both)
-
-| Field | v1 Shamela | v2 Podia |
-|-------|:---:|:---:|
-| `narrator_id` / `rawi_id` | ✅ | ✅ |
-| `hadith_count` | ✅ | ✅ |
-| `teachers[]` (`narrator_id`, `name`, `freq`) | ✅ | ✅ |
-| `students[]` (`narrator_id`, `name`, `freq`) | ✅ | ✅ |
-
-#### v2-only: `/tarajem` endpoint (narrator biography)
-
-| Field | Notes |
-|-------|-------|
-| `rawi_id` | Narrator ID |
-| `url` | Source URL |
-| `name_in_chain`, `name_in_chain_plain` | Name as in chain |
-| `full_name`, `full_name_plain` | Full canonical name |
-| `rank`, `rank_plain` | |
-| `narrator_info[]` | `action` + `text` + `text_plain` — structured biography entries |
-| `tarajim[]` | `source` + `tarjama` + `tarjama_plain` — scholar biography texts |
-
----
-
-### Advanced Extraction Data (Neo4j only)
-
-`extract_data_v2/playwrite/bukhari_pedia_advanced_extraction_results.json` contains richer chain data for **7,076 hadiths** extracted by LLM. This data goes to **Neo4j**, not MongoDB.
-
-| Field | Present | Notes |
-|-------|:---:|-------|
-| `hadith_indices` | ✅ | List of ints |
-| `hadith_url` | ✅ | |
-| `book_name`, `chapter` | ✅ | |
-| `hadith_text`, `hadith_text_clean` | ✅ | Raw + cleaned |
-| `sanad_text` | ✅ | Chain text only |
-| `matn_text` | ✅ | Matn text only |
-| `tawabi_text` | ✅ | Follow-up text |
-| `chains[]` | ✅ | Multi-chain support (1,614 hadiths have >1 chain) |
-| `chains[].type` | ✅ | `primary` / `nested` / `follow_up` |
-| `chains[].narrators[].rawi_id` | ✅ | |
-| `chains[].narrators[].name` | ✅ | |
-| `chains[].narrators[].role` | ✅ | `narrator` / `lead` |
-| `chains[].narrators[].transmission` | ✅ | Arabic transmission word (e.g. حدثنا) |
-| `chains[].narrators[].transmission_type` | ✅ | `samaa` / `ambiguous` / `anana` / `ijaza_or_munawala` / `mukataba` / `samaa_or_ard` / `unknown` |
-| `chains[].narrators[].is_explicit_hearing` | ✅ | Boolean |
-| `ground_truth_match` | ✅ | LLM validation flag |
-| `model_used` | ✅ | LLM model used for extraction |
-| `route_reason` | ✅ | Why this route was chosen (e.g. `length_threshold`) |
-
----
-
-#### Example requests
+## Example Requests
 
 ```bash
+# Health
+curl http://localhost:8000/health
+
 # v1 — Shamela
 curl http://localhost:8000/api/v1/hadiths
 curl "http://localhost:8000/api/v1/hadiths?hadith_plain=نام"
 curl "http://localhost:8000/api/v1/hadiths?narrator_id=822"
-curl http://localhost:8000/api/v1/hadiths/1
-curl http://localhost:8000/api/v1/narrators
-curl "http://localhost:8000/api/v1/narrators?name_plain=مالك"
-curl http://localhost:8000/api/v1/narrators/822
 curl http://localhost:8000/api/v1/narrators/822/stats
 
 # v2 — Podia
 curl http://localhost:8000/api/v2/hadiths
-curl "http://localhost:8000/api/v2/hadiths?hadith_text_plain=نام"
-curl "http://localhost:8000/api/v2/hadiths?rawi_id=822"
-curl http://localhost:8000/api/v2/hadiths/1
-curl http://localhost:8000/api/v2/narrators
-curl "http://localhost:8000/api/v2/narrators?full_name_plain=مالك"
-curl http://localhost:8000/api/v2/narrators/822
+curl "http://localhost:8000/api/v2/hadiths?hadith_text_plain=الصلاة"
+curl "http://localhost:8000/api/v2/hadiths?topic=الصلاة"
 curl http://localhost:8000/api/v2/narrators/822/tarajem
 curl http://localhost:8000/api/v2/narrators/822/stats
+curl http://localhost:8000/api/v2/topics
+curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
 ```
 
-#### Response shapes
+---
 
-```jsonc
-// v1 PaginatedHadiths
-{ "items": [ { "id": "...", "hadith_index": 1, "source": "bukhari",
-               "hadith": "...", "hadith_plain": "...", "matn_plain": [...],
-               "n_matn": 1, "n_chains": 2,
-               "chains": [{ "chain_id": "...", "type": "primary",
-                            "narrators": [{ "name": "...", "role": "narrator", "narrator_id": 1 }] }],
-               "unique_narrators": [{ "name": "...", "narrator_id": 1 }] }],
-  "total": 7230 }
+## Data Field Comparison
 
-// v1 PaginatedNarrators
-{ "items": [ { "id": "...", "narrator_id": 1, "name": "...", "name_plain": "...",
-               "kunya": "...", "nasab": "...", "death_date": "...", "tabaqa": "...",
-               "rank_ibn_hajar": "...", "rank_dhahabi": "...", "relations": "...",
-               "jarh_wa_tadil": [{ "scholar": "...", "quotes": ["..."] }] }],
-  "total": 1527 }
+### Hadith fields
 
-// v1 NarratorStats
-// freq = number of distinct hadiths where this narrator-pair co-appears (not raw chain occurrences)
-{ "narrator_id": 822, "hadith_count": 195,
-  "teachers": [{ "narrator_id": 3320, "name": "أبو هريرة", "freq": 38 }],
-  "students": [{ "narrator_id": 857,  "name": "أيوب",      "freq": 47 }] }
+| Field | v1 Shamela | v2 Podia | Notes |
+|-------|:---:|:---:|-------|
+| `hadith_index` / `hadith_indices` | ✅ single int | ✅ list | Podia hadiths can span multiple indices |
+| `hadith` / `hadith_text` | ✅ | ✅ | Full text with tashkeel |
+| `hadith_plain` / `hadith_text_plain` | ✅ | ✅ | Tashkeel stripped, for search |
+| `book`, `chapter` | ❌ | ✅ | |
+| `hadith_url` | ❌ | ✅ | Source URL |
+| `sanad_text`, `matn_text`, `tawabi_text` | ❌ | ✅ | Segmented text |
+| `topics[]` | ❌ | ✅ | Arabic semantic topic tags (LLM-generated) |
+| `matn_embedding` | ❌ | ✅ | 1536-dim Cohere vector (for semantic search) |
+| `chains[]` | ✅ | ✅ | Multi-chain with transmission types |
+| `narrators[]` | ❌ | ✅ | Per-hadith narrator list |
 
-// v2 PaginatedPodiaHadiths
-{ "items": [ { "id": "...", "hadith_url": "...", "hadith_indices": [1],
-               "source": "bukhari", "book": "...", "chapter": "...",
-               "hadith_text": "...", "hadith_text_plain": "...",
-               "narrators": [{ "rawi_id": 1, "name_in_chain": "...",
-                               "name_in_chain_plain": "...", "full_name": "...",
-                               "rank": "...", "rank_plain": "..." }] }],
-  "total": 7008 }
+### Narrator fields
 
-// v2 PaginatedPodiaNarrators
-{ "items": [ { "id": "...", "rawi_id": 1, "name_in_chain": "...",
-               "name_in_chain_plain": "...", "full_name": "...", "full_name_plain": "...",
-               "rank": "...", "rank_plain": "...", "full_tooltip_info": "..." }],
-  "total": 1600 }
+| Field | v1 Shamela | v2 Podia |
+|-------|:---:|:---:|
+| `name` / `name_in_chain` | ✅ | ✅ |
+| `full_name`, `full_name_plain` | ❌ | ✅ |
+| `rank`, `rank_plain` | ❌ | ✅ |
+| `kunya`, `nasab`, `tabaqa` | ✅ | ❌ |
+| `rank_ibn_hajar`, `rank_dhahabi` | ✅ | ❌ |
+| `jarh_wa_tadil[]` | ✅ | via `/tarajem` |
 
-// v2 PodiaNarratorTarajem
-{ "id": "...", "rawi_id": 1, "url": "...",
-  "name_in_chain": "...", "full_name": "...", "rank": "...",
-  "narrator_info": [{ "action": "...", "text": "...", "text_plain": "..." }],
-  "tarajim": [{ "source": "...", "tarjama": "...", "tarjama_plain": "..." }] }
+---
 
-// v2 PodiaNarratorStats
-// freq = number of distinct hadiths where this narrator-pair co-appears (not raw chain occurrences)
-{ "rawi_id": 822, "hadith_count": 195,
-  "teachers": [{ "rawi_id": 3320, "name": "أبو هريرة", "freq": 38 }],
-  "students": [{ "rawi_id": 857,  "name": "أيوب",      "freq": 47 }] }
-```
+## Matn Embeddings & Topics
 
-### Test results (2026-02-24)
+All 7,076 Podia hadiths are enriched with:
+- **`matn_embedding`** — 1536-dim Cohere `embed-v4.0` vector (for semantic search / RAG)
+- **`topics`** — 1–3 Arabic semantic tags generated by Gemini Flash via OpenRouter
 
-| Endpoint | Status | Result |
-|----------|--------|--------|
-| `GET /api/v1/hadiths` | ✅ 200 | `total=7008`, 20 items per page |
-| `GET /api/v1/hadiths?hadith_plain=نام` | ✅ 200 | `total=125` matching hadiths |
-| `GET /api/v1/hadiths/{id}` | ✅ 200 | Full hadith with `chains[]` and `unique_narrators[]` |
-| `GET /api/v1/narrators` | ✅ 200 | `total=1523`, 20 items per page |
-| `GET /api/v1/narrators?name_plain=مالك` | ✅ 200 | `total=145` matching narrators |
-| `GET /api/v1/narrators/{id}` | ✅ 200 | Full narrator with `jarh_wa_tadil[]` |
-| `GET /api/v1/narrators/{id}/stats` | ✅ 200 | `hadith_count`, `teachers[]`, `students[]` with frequencies |
+### JSONL-first enrichment (preferred — no MongoDB dependency)
 
-### Environment Variables
+Two offline scripts write slim output files to the repo root, then import into MongoDB separately:
 
 ```bash
-MONGODB_URI_READ=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+# Run in tmux enrichment session (topics first, then embeddings automatically)
+tmux new-session -d -s enrichment
+tmux send-keys -t enrichment 'cd ~/Projects/hadathanaBackendApp && \
+  /home/abdo_kamar/Projects/.venv/bin/python scripts/tag_topics_jsonl.py && \
+  /home/abdo_kamar/Projects/.venv/bin/python scripts/embed_matn_jsonl.py' Enter
+
+# Smoke test (5 docs each)
+python scripts/tag_topics_jsonl.py --limit 5
+python scripts/embed_matn_jsonl.py --limit 5
+
+# Dry run (estimate API calls)
+python scripts/tag_topics_jsonl.py --dry-run
+python scripts/embed_matn_jsonl.py --dry-run
+```
+
+Output files (repo root, gitignored):
+- `hadith_topics.jsonl` — `hadith_url` + `topics` → import to MongoDB
+- `hadith_embeddings.jsonl` — `hadith_url` + `matn_embedding` → Qdrant / vector DB (deferred)
+
+Both scripts are **resumable** — re-running skips already-processed `hadith_url`s.
+
+Import topics into MongoDB after the script completes (use the `$set` script — **do not** use `mongoimport --mode=upsert` as it replaces entire documents):
+```bash
+# Apply topics as $set updates (merges topics field, preserves all other hadith data)
+python scripts/apply_topics.py --db HadithDataDev
+```
+
+Or run inline:
+```python
+# scripts/apply_topics.py equivalent — inline version
+import json
+from pymongo import MongoClient, UpdateOne
+col = MongoClient("mongodb://localhost:27017/")["HadithDataDev"]["processed_podia_books"]
+ops = [UpdateOne({"hadith_url": d["hadith_url"]}, {"$set": {"topics": d.get("topics", [])}})
+       for d in (json.loads(l) for l in open("hadith_topics.jsonl"))]
+result = col.bulk_write(ops, ordered=False)
+print(f"Modified: {result.modified_count}")
+```
+
+Requires `COHERE_API_KEY` and `OPENROUTER_API_KEY` in `.env`.
+
+### Legacy (Atlas-dependent)
+
+```bash
+python scripts/embed_matn.py              # full run — requires Atlas write access
+python scripts/embed_matn.py --dry-run    # estimate cost only
+python scripts/embed_matn.py --limit 5    # smoke test on 5 docs
+```
+
+---
+
+## Environment Variables
+
+See `.env.example` for the full list. Key variables:
+
+```bash
+APP_ENV=dev                          # "dev" or "prod"
+
+# MongoDB — prod (Atlas)
+MONGODB_URI_READ=mongodb+srv://...
+MONGODB_URI_READ_WRITE=mongodb+srv://...
 DB_NAME=HadithData
 
-# Use * to allow all origins (public API).
-# For restricted access, use comma-separated list:
-# CORS_ORIGINS=https://hadathana.com,https://www.hadathana.com
-CORS_ORIGINS=*
+# MongoDB — dev (local Docker)
+MONGODB_URI_LOCAL=mongodb://localhost:27017/
+DB_NAME_DEV=HadithDataDev
+
+# CORS
+CORS_ORIGINS=https://hadathana.app,https://www.hadathana.app
+CORS_ORIGINS_DEV=http://localhost:3000,http://localhost:5173
+
+# Embeddings & topic tagging
+COHERE_API_KEY=
+OPENROUTER_API_KEY=
+
+# Cloudflare R2 (data snapshots)
+R2_ENDPOINT_URL=
+R2_BUCKET=hadathana-data
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
 ```
 
 ---
 
 ## Data Snapshots (Cloudflare R2)
 
-Large datasets are stored in Cloudflare R2 instead of git. After cloning, pull the latest data with:
+All JSONL data files are stored in R2, not git. **Always check R2 for the latest snapshot before starting any data work.**
 
 ```bash
-uv pip install boto3 python-dotenv tqdm   # one-time setup
+# See what snapshots exist
+python scripts/r2_sync/list_snapshots.py
 
-# List available snapshots
-uv run scripts/r2_sync/list_snapshots.py
-
-# Download the latest snapshot for a dataset
-uv run scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --latest
-
-# Upload a local folder as today's snapshot
-uv run scripts/r2_sync/push_snapshot.py --dataset bukhari_shamela --source data/
+# Pull latest snapshot after cloning or before data work
+python scripts/r2_sync/pull_snapshot.py --dataset bukhari_podia --latest
+python scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --latest
 ```
-
-Snapshots are organized as `snapshots/<dataset>/<YYYY-MM-DD>/` in the R2 bucket. Downloaded files go to `data_snapshots/` (gitignored).
-
-Requires `R2_ENDPOINT_URL`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` in `.env` — see `.env.example`.
 
 Full docs: [scripts/r2_sync/README.md](scripts/r2_sync/README.md)
 
 ---
 
-## Troubleshooting
+## Data Update Workflow
 
-**Auth error:** Check `docker inspect neo4j-hadith` for `NEO4J_AUTH` value — that's the real password.
+When enriching or modifying data (e.g. adding topics, embeddings, new fields):
 
-**Connection refused:** `docker start neo4j-hadith` and wait ~15 seconds.
+**1. Write/update the script**
+- New enrichment → new file under `scripts/` (e.g. `scripts/embed_matn.py`)
+- Schema change → update the relevant preprocessing script and `app/models/`
 
-**Duplicate data:** Clear with `MATCH (n) DETACH DELETE n;` in Neo4j Browser, then re-run `build_graph.py`.
+**2. Pull latest data from R2**
+```bash
+python scripts/r2_sync/pull_snapshot.py --dataset bukhari_podia --latest
+```
+
+**3. Run the script against `HadithDataDev` first**
+```bash
+# Make sure APP_ENV=dev in .env (points to local Docker + HadithDataDev)
+python scripts/your_script.py
+```
+
+**4. Verify in dev, test the API**
+```bash
+# Confirm data looks right
+curl "http://localhost:8001/api/v2/hadiths?limit=3"
+# Run tests
+python -m pytest tests/ -v
+```
+
+**5. Push enriched JSONL to R2**
+```bash
+python scripts/r2_sync/push_snapshot.py --dataset bukhari_podia \
+  --source mongo_migration/processed_bukhari_podia/ --extensions jsonl
+```
+
+**6. Promote to prod (Atlas)**
+```bash
+# Option A — re-run upload against Atlas
+MONGODB_URI_READ_WRITE=<atlas_uri> DB_NAME=HadithData python mongo_migration/upload.py
+
+# Option B — mongodump from local dev, mongorestore to Atlas
+mongodump --uri mongodb://localhost:27017/ --db HadithDataDev --out /tmp/dump
+mongorestore --uri <atlas_uri> --db HadithData /tmp/dump/HadithDataDev
+```
+
+**7. Restart prod**
+```bash
+# In tmux hadathana_deployment — make sure APP_ENV=prod in .env
+# Ctrl+C, then:
+/home/abdo_kamar/Projects/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+---
+
+## Deploy to Railway / Render
+
+1. Push repo to GitHub
+2. Create project on Railway or Render, connect the repo
+3. Set env vars in the platform dashboard (see `.env.example`)
+4. In MongoDB Atlas → **Network Access** → allow `0.0.0.0/0`
+5. Platform auto-detects `Dockerfile` and deploys
+
+---
+
+## Neo4j Graph (optional)
+
+```bash
+PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
+
+# Dry run
+"$PYTHON" mongo_migration/processed_bukhari_podia/build_graph.py --dry-run
+
+# Full ingestion
+"$PYTHON" mongo_migration/processed_bukhari_podia/build_graph.py
+
+# Manage container
+docker start neo4j-hadith
+docker stop neo4j-hadith
+# Browser: http://localhost:7474
+```

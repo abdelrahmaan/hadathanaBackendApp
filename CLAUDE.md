@@ -95,20 +95,77 @@ Future (not yet populated):
 
 ### Development Server
 
-```bash
-# Run FastAPI dev server (assumes uv venv in parent directory)
-/Users/a.kamar/Documents/Abdo\ Kaamar/projects/.venv/bin/uvicorn app.main:app --reload
+Two environments are configured via `APP_ENV` in `.env`:
 
-# Or if using a local venv:
-uvicorn app.main:app --reload
+| `APP_ENV` | MongoDB URI | Database | Port | CORS |
+|---|---|---|---|---|
+| `dev` | `MONGODB_URI_LOCAL` (Docker) | `HadithDataDev` | 8001 | localhost origins |
+| `prod` | `MONGODB_URI_READ` (Atlas) | `HadithData` | 8000 | production origins |
+
+```bash
+PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
+
+# Dev (local Docker MongoDB, HadithDataDev) — set APP_ENV=dev in .env first
+"$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+
+# Prod (Atlas, HadithData) — runs in tmux hadathana_deployment
+# set APP_ENV=prod in .env, then:
+"$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-API docs: http://localhost:8000/docs
+**Production is managed in `tmux hadathana_deployment`** — never restart it without switching `APP_ENV=prod` first.
+
+API docs: http://localhost:8000/docs (prod) or http://localhost:8001/docs (dev)
+
+### Local MongoDB (Docker)
+
+```bash
+# Start local MongoDB container (persists data in docker volume)
+docker run -d --name mongodb-hadathana \
+  -p 27017:27017 \
+  -v mongodb_hadathana_data:/data/db \
+  mongo:8
+
+# If already created, just start it
+docker start mongodb-hadathana
+
+# Stop it
+docker stop mongodb-hadathana
+```
+
+**Two databases on the local container:**
+- `HadithData` — mirrors prod Atlas (used when Atlas is down as fallback)
+- `HadithDataDev` — dev/testing database
+
+**Bootstrap local DBs from JSONL files:**
+```bash
+# Import all collections into a target DB (HadithData or HadithDataDev)
+DB=HadithDataDev
+
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_books \
+  < mongo_migration/processed_bukhari_podia/bukhari_podia_hadiths.jsonl
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_narrators \
+  < mongo_migration/processed_bukhari_podia/bukhari_podia_narrators.jsonl
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_narrator_biographies \
+  < mongo_migration/processed_bukhari_podia/bukhari_narrators_tarajem.jsonl
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection raw_shamela_books \
+  < mongo_migration/processed_bukhari_shamela/preprocessed_bukhari.jsonl
+docker exec -i mongodb-hadathana mongoimport --db $DB --collection raw_shamela_narrators \
+  < mongo_migration/processed_bukhari_shamela/narrators.jsonl
+
+# Create indexes
+MONGODB_URI_READ_WRITE=mongodb://localhost:27017/ DB_NAME=$DB \
+  python mongo_migration/create_indexes.py
+
+# Compute narrator stats (required — not in JSONL files)
+MONGODB_URI_READ_WRITE=mongodb://localhost:27017/ DB_NAME=$DB \
+  python mongo_migration/processed_bukhari_podia/compute_stats.py
+```
 
 ### Tests
 
 ```bash
-PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
+PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 "$PYTHON" -m pytest tests/ -v
 ```
 
@@ -201,6 +258,32 @@ Requires: `pip install boto3 python-dotenv tqdm` and R2 credentials in `.env`.
 
 Full docs: `scripts/r2_sync/README.md`
 
+### Offline Enrichment Scripts (JSONL-first, no MongoDB required)
+
+Two scripts enrich hadiths without any MongoDB dependency. They read the source JSONL directly and write slim output files to the repo root.
+
+| Script | Input | Output | Destination |
+|---|---|---|---|
+| `scripts/tag_topics_jsonl.py` | `bukhari_podia_hadiths.jsonl` | `hadith_topics.jsonl` | MongoDB (`mongoimport --mode=upsert`) |
+| `scripts/embed_matn_jsonl.py` | `bukhari_podia_hadiths.jsonl` | `hadith_embeddings.jsonl` | Qdrant / vector DB (deferred) |
+
+Both are **resumable** — re-running skips already-processed `hadith_url`s. Source JSONL is never modified.
+
+```bash
+# Run in tmux enrichment session (topics → embeddings, chained)
+tmux new-session -d -s enrichment
+tmux send-keys -t enrichment 'cd ~/Projects/hadathanaBackendApp && \
+  /home/abdo_kamar/Projects/.venv/bin/python scripts/tag_topics_jsonl.py && \
+  /home/abdo_kamar/Projects/.venv/bin/python scripts/embed_matn_jsonl.py' Enter
+
+# After topics finish — import into HadithDataDev
+docker exec -i mongodb-hadathana mongoimport --db HadithDataDev \
+  --collection processed_podia_books --mode=upsert --upsertFields=hadith_url \
+  < hadith_topics.jsonl
+```
+
+Requires `OPENROUTER_API_KEY` (topics) and `COHERE_API_KEY` (embeddings) in `.env`.
+
 ## Key Implementation Patterns
 
 ### API Endpoint Structure
@@ -234,41 +317,85 @@ if hadith_plain:
 Required in `.env`:
 
 ```bash
-# MongoDB (FastAPI)
-MONGODB_URI_READ=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
-DB_NAME=HadithData
-CORS_ORIGINS=*
+# ── Environment ───────────────────────────────────────────────
+# "prod" → Atlas + HadithData + port 8000
+# "dev"  → local Docker MongoDB + HadithDataDev + port 8001
+APP_ENV=prod
 
-# Neo4j (graph scripts)
+# ── MongoDB (prod — Atlas) ────────────────────────────────────
+MONGODB_URI_READ=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+MONGODB_URI_READ_WRITE=mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/
+DB_NAME=HadithData
+
+# ── MongoDB (dev — local Docker) ─────────────────────────────
+MONGODB_URI_LOCAL=mongodb://localhost:27017/
+DB_NAME_DEV=HadithDataDev
+
+# ── CORS ──────────────────────────────────────────────────────
+CORS_ORIGINS=https://hadathana.app,https://www.hadathana.app
+CORS_ORIGINS_DEV=http://localhost:3000,http://localhost:5173
+
+# ── Neo4j (graph scripts) ─────────────────────────────────────
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 
-# Cloudflare R2 (data snapshots — see scripts/r2_sync/README.md)
+# ── Cloudflare R2 (data snapshots) ───────────────────────────
 R2_ENDPOINT_URL=https://<account_id>.r2.cloudflarestorage.com
 R2_BUCKET=hadathana_data
 R2_ACCESS_KEY_ID=<your_access_key>
 R2_SECRET_ACCESS_KEY=<your_secret_key>
 ```
 
-**Note**: Use `MONGODB_URI_READ` in production (follows principle of least privilege). See `app/config.py` for settings loading.
+See `app/config.py` — `Settings.get_mongodb_uri()` and `Settings.get_db_name()` switch automatically based on `APP_ENV`.
 
 ## Python Environment
 
-The project uses a shared `uv` venv at parent directory level:
-```bash
-/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/
-```
+The project uses a shared `uv` venv at `/home/abdo_kamar/Projects/.venv/`:
 
-When running scripts, use the full path to the Python interpreter:
 ```bash
-PYTHON="/Users/a.kamar/Documents/Abdo Kaamar/projects/.venv/bin/python"
+PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 "$PYTHON" mongo_migration/upload.py
 ```
 
 ## Data Storage
 
-**All data files are stored in Cloudflare R2** (S3-compatible object storage), not in git. The repo `.gitignore` excludes all `.json`, `.jsonl`, `.csv`, `.xlsx`, and `.parquet` files under data directories. After cloning, pull data with the R2 sync scripts (see below).
+**All data files are stored in Cloudflare R2** (S3-compatible object storage), not in git. The repo `.gitignore` excludes all `.json`, `.jsonl`, `.csv`, `.xlsx`, and `.parquet` files under data directories so they can never be accidentally committed. After cloning, pull data with the R2 sync scripts (see below).
+
+### Data update workflow
+
+When enriching or modifying data (adding fields, new embeddings, topic tags, etc.):
+
+1. **Write/update the script** — new enrichment → new file under `scripts/`; schema change → update preprocessing script + `app/models/`
+2. **Pull latest data from R2** — `python scripts/r2_sync/pull_snapshot.py --dataset bukhari_podia --latest`
+3. **Run against `HadithDataDev` first** — `APP_ENV=dev` must be set in `.env`
+4. **Verify in dev** — test endpoints on port 8001, run `pytest`
+5. **Push enriched JSONL to R2** — `python scripts/r2_sync/push_snapshot.py --dataset bukhari_podia --source mongo_migration/processed_bukhari_podia/ --extensions jsonl`
+6. **Promote to prod (Atlas)** — re-run `upload.py` against Atlas or use `mongodump`/`mongorestore`
+7. **Restart prod** — in `tmux hadathana_deployment` with `APP_ENV=prod`
+
+### Change detection workflow
+
+Data files are registered with git via `git add --intent-to-add --force` so `git status` shows when they change — but `.gitignore` prevents them from ever being staged or committed. Use this as your signal to push to R2:
+
+```bash
+# 1. See what changed (data + code together)
+git status
+
+# 2. If data changed → push to R2
+python scripts/r2_sync/push_snapshot.py --dataset bukhari_podia \
+  --source mongo_migration/processed_bukhari_podia/ --extensions jsonl
+
+# 3. Code changes → commit normally (data is blocked by .gitignore)
+git add app/
+git commit -m "feat: ..."
+```
+
+To register newly pulled data files for change tracking:
+```bash
+git add --intent-to-add --force mongo_migration/processed_bukhari_podia/*.jsonl
+git add --intent-to-add --force extract_data_v2/playwrite/*.jsonl
+```
 
 **Shamela input**:
 - `extract_data_v2/firecrawl/shamela_book_1681.jsonl` - raw hadiths
