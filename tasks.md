@@ -180,11 +180,11 @@
 - [ ] Affects all v1 & v2 hadith + narrator text search params
 
 ### Hadith Topic Classification (offline pipeline)
-- [ ] Define topic taxonomy (e.g., صيام، صلاة، طهارة، نكاح، زكاة، حج، عقيدة، أخلاق)
-- [ ] Implement root-based or LLM-based classifier for hadith `matn_text` (Arabic morphology requires root matching — keyword lists alone are insufficient)
-- [ ] Run classification as offline pipeline step; store `topics: [...]` array in MongoDB documents
-- [ ] Add `GET /api/v2/hadiths?topic=صيام` filter endpoint
-- [ ] Write tests for the new `topic` filter param
+- [x] Define topic taxonomy (47 Arabic topic tags, e.g., الصلاة، الصوم، العقيدة والتوحيد، الأخلاق والآداب)
+- [x] Implement LLM-based classifier for hadith `matn_text` (Gemini Flash via OpenRouter) — `scripts/tag_topics_jsonl.py`
+- [x] Run classification as offline pipeline step; store `topics: [...]` array in `processed_podia_books` — 7,075/7,076 hadiths tagged
+- [x] Add `GET /api/v2/hadiths?topic=صيام` filter endpoint
+- [x] Add `GET /api/v2/topics` endpoint (all topics with counts)
 
 ### Semantic Search (complements v1.3)
 - [ ] Prerequisite: v1.0 data quality (narrator coverage 75% → 95%) must be done first
@@ -242,7 +242,7 @@
 | v1.1 | Data Enrichment | Not started |
 | v1.2 | Neo4j Graph Database | Not started |
 | v1.3 | Semantic Search | Not started |
-| v1.4 | Arabic Normalization & Advanced Search | Not started |
+| v1.4 | Arabic Normalization & Advanced Search | In progress (topic classification done) |
 | v2.0 | Production Release | Not started |
 
 **Current version**: v0.5 (all foundational work complete)
@@ -251,6 +251,13 @@
 ---
 
 ## Chore Log
+
+### fix: restore HadithDataDev after mongoimport upsert wiped hadith data (2026-04-02)
+**Status**: done
+**Summary**: `mongoimport --mode=upsert` on `hadith_topics.jsonl` replaced entire documents in `processed_podia_books` with slim `{hadith_url, topics}` records, destroying all hadith fields. Fixed by: (1) dropping the broken collection, (2) re-importing full `bukhari_podia_hadiths.jsonl`, (3) applying topics via PyMongo `bulk_write` with `$set` updates (merges field, does not replace document). Updated README to warn against `mongoimport --mode=upsert` for partial field updates. Confirmed Atlas (prod) was unaffected — topics were already present.
+**Touched files**:
+- `README.md` (replaced unsafe `mongoimport --mode=upsert` instructions with `$set` bulk write)
+- `tasks.md`
 
 ### feat: JSONL-first topic tagging + matn embedding (2026-04-01)
 **Status**: done

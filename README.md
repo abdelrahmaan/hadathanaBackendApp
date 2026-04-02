@@ -205,11 +205,22 @@ Output files (repo root, gitignored):
 
 Both scripts are **resumable** — re-running skips already-processed `hadith_url`s.
 
-Import topics into MongoDB after the script completes:
+Import topics into MongoDB after the script completes (use the `$set` script — **do not** use `mongoimport --mode=upsert` as it replaces entire documents):
 ```bash
-docker exec -i mongodb-hadathana mongoimport --db HadithDataDev \
-  --collection processed_podia_books --mode=upsert --upsertFields=hadith_url \
-  < hadith_topics.jsonl
+# Apply topics as $set updates (merges topics field, preserves all other hadith data)
+python scripts/apply_topics.py --db HadithDataDev
+```
+
+Or run inline:
+```python
+# scripts/apply_topics.py equivalent — inline version
+import json
+from pymongo import MongoClient, UpdateOne
+col = MongoClient("mongodb://localhost:27017/")["HadithDataDev"]["processed_podia_books"]
+ops = [UpdateOne({"hadith_url": d["hadith_url"]}, {"$set": {"topics": d.get("topics", [])}})
+       for d in (json.loads(l) for l in open("hadith_topics.jsonl"))]
+result = col.bulk_write(ops, ordered=False)
+print(f"Modified: {result.modified_count}")
 ```
 
 Requires `COHERE_API_KEY` and `OPENROUTER_API_KEY` in `.env`.
