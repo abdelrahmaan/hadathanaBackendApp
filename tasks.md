@@ -432,6 +432,19 @@
 - `CLAUDE.md` (added Data Storage section, R2 sync commands, R2 env vars)
 - `tasks.md`
 
+### fix: backend serving empty data — add startup validation, bootstrap script, docker-compose (2026-04-04)
+**Status**: done
+**Summary**: Backend API returned empty results (`{"items":[], "total":0}`) because both local MongoDB databases (`HadithData`, `HadithDataDev`) had zero collections — data was lost (likely volume prune/recreation). This is the 2nd or 3rd occurrence. Fix: (1) re-import all JSONL data including topics and embeddings, (2) add startup validation that logs ERROR when collections are empty, (3) fix health endpoint to actually check MongoDB and report collection counts, (4) create `scripts/bootstrap_local_db.py` for automated recovery (imports JSONL + indexes + stats + enrichments in one command), (5) create `docker-compose.yml` with named volumes and auto-bootstrap on startup, (6) fix Dockerfile dynamic port. Also documented that production currently runs with `APP_ENV=dev` on port 8000 backed by local Docker MongoDB (Atlas was unreachable since 2026-04-01).
+**Touched files**:
+- `app/database.py` (startup validation, `validate_connection()`, `EXPECTED_COLLECTIONS`)
+- `app/main.py` (health endpoint with MongoDB status + collection counts)
+- `scripts/bootstrap_local_db.py` (new — full bootstrap: JSONL import + indexes + stats + topics/embeddings)
+- `docker-compose.yml` (new — mongo + mongo-init + api with named volume)
+- `Dockerfile` (dynamic port via `$PORT` env var)
+- `tests/conftest.py` (patch `validate_connection` in test fixture)
+- `tasks.md`
+- `CLAUDE.md` (docker-compose docs, bootstrap script docs, current production state note)
+
 ### Rename analytics_narrator_stats → analytics_narrator_stats_shamela (2026-03-15)
 **Status**: Done
 **Summary**: Renamed `analytics_narrator_stats` to `analytics_narrator_stats_shamela` to be consistent with the `_shamela` suffix pattern used across all other Shamela collections.

@@ -93,94 +93,115 @@ Future (not yet populated):
 
 ## Common Commands
 
-### Development Server
+### Docker Compose (production & development)
 
-Two environments are configured via `APP_ENV` in `.env`:
+**`docker compose` is the single entry point** for the entire backend stack. It manages MongoDB, data bootstrapping, and the API server.
+
+#### Everyday commands
+
+```bash
+# Start the full stack (detached — runs in background)
+docker compose up -d
+
+# Follow logs (all services)
+docker compose logs -f
+
+# Follow logs (API only)
+docker compose logs -f api
+
+# Restart API after code changes (no rebuild needed — app/ is volume-mounted)
+docker compose restart api
+
+# Rebuild after changing requirements.txt or Dockerfile
+docker compose up -d --build
+
+# Stop everything (data persists in named volume)
+docker compose down
+
+# Check service status
+docker compose ps
+
+# Shell into a running container
+docker exec -it hadathana-api sh
+docker exec -it mongodb-hadathana mongosh HadithDataDev
+```
+
+#### What happens on `docker compose up`
+
+1. **`mongo`** starts with a named volume (`mongodb_hadathana_data`) — data survives `docker compose down` and restarts
+2. **`mongo-init`** checks if `HadithDataDev` is empty — if so, imports all JSONL files + creates indexes + computes stats + applies topics & embeddings. If data exists, exits in <1s.
+3. **`api`** starts on port 8000, connects to MongoDB, validates all collections at startup, logs ERROR if any are missing/empty
+
+#### Health check
+
+```bash
+curl http://localhost:8000/health
+# Returns: {"status":"ok","mongodb":"connected","collections":{"processed_podia_books":7076,...}}
+# Returns: {"status":"degraded",...} if MongoDB is down or collections are empty
+```
+
+#### Data safety
+
+```bash
+# ⚠️ These commands DESTROY ALL MongoDB data:
+docker compose down -v         # removes volumes
+docker volume prune            # removes unused volumes
+docker volume rm mongodb_hadathana_data  # removes the specific volume
+
+# If data is lost, just restart — mongo-init will auto-bootstrap from JSONL files:
+docker compose up -d
+```
+
+#### Adding future services
+
+Add new services to `docker-compose.yml`. Commented-out templates for Qdrant and mongo-express are already included. Examples:
+
+```bash
+# After uncommenting a service in docker-compose.yml:
+docker compose up -d           # starts new service alongside existing ones
+docker compose logs -f qdrant  # follow its logs
+```
+
+### Environment Configuration
 
 | `APP_ENV` | MongoDB URI | Database | Port | CORS |
 |---|---|---|---|---|
-| `dev` | `MONGODB_URI_LOCAL` (Docker) | `HadithDataDev` | 8001 | localhost origins |
+| `dev` | `MONGODB_URI_LOCAL` (Docker) | `HadithDataDev` | 8000 | localhost origins |
 | `prod` | `MONGODB_URI_READ` (Atlas) | `HadithData` | 8000 | production origins |
+
+The API always runs on port 8000. `APP_ENV` controls which MongoDB URI and database name to use. Currently set to `dev` in `docker-compose.yml` (Atlas unreachable since 2026-04-01).
+
+To switch to prod (Atlas): change `APP_ENV=dev` → `APP_ENV=prod` in docker-compose.yml, then `docker compose restart api`.
+
+API docs: http://localhost:8000/docs
+
+### Bootstrap script (standalone)
+
+The bootstrap script can also be run outside docker-compose for manual recovery:
 
 ```bash
 PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 
-# Dev (local Docker MongoDB, HadithDataDev) — set APP_ENV=dev in .env first
-"$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+# Bootstrap HadithDataDev (skips if data already exists)
+"$PYTHON" scripts/bootstrap_local_db.py
 
-# Prod (Atlas, HadithData) — runs in tmux hadathana_deployment
-# set APP_ENV=prod in .env, then:
-"$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Bootstrap a specific database
+"$PYTHON" scripts/bootstrap_local_db.py --db HadithData
+
+# Force re-import (even if data exists)
+"$PYTHON" scripts/bootstrap_local_db.py --force
+
+# Custom MongoDB URI (e.g. inside Docker network)
+"$PYTHON" scripts/bootstrap_local_db.py --uri mongodb://mongo:27017/
 ```
 
-**Production is managed in `tmux hadathana_deployment`** — never restart it without switching `APP_ENV=prod` first.
-
-API docs: http://localhost:8000/docs (prod) or http://localhost:8001/docs (dev)
-
-### Local MongoDB (Docker)
-
-```bash
-# Start local MongoDB container (persists data in docker volume)
-docker run -d --name mongodb-hadathana \
-  -p 27017:27017 \
-  -v mongodb_hadathana_data:/data/db \
-  mongo:8
-
-# If already created, just start it
-docker start mongodb-hadathana
-
-# Stop it
-docker stop mongodb-hadathana
-```
-
-**Two databases on the local container:**
-- `HadithData` — mirrors prod Atlas (used when Atlas is down as fallback)
-- `HadithDataDev` — dev/testing database
-
-**Bootstrap local DBs from JSONL files:**
-```bash
-# Import all collections into a target DB (HadithData or HadithDataDev)
-DB=HadithDataDev
-
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_books \
-  < mongo_migration/processed_bukhari_podia/bukhari_podia_hadiths.jsonl
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_narrators \
-  < mongo_migration/processed_bukhari_podia/bukhari_podia_narrators.jsonl
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_narrator_biographies \
-  < mongo_migration/processed_bukhari_podia/bukhari_narrators_tarajem.jsonl
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection raw_shamela_books \
-  < mongo_migration/processed_bukhari_shamela/preprocessed_bukhari.jsonl
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection raw_shamela_narrators \
-  < mongo_migration/processed_bukhari_shamela/narrators.jsonl
-
-# Create indexes
-MONGODB_URI_READ_WRITE=mongodb://localhost:27017/ DB_NAME=$DB \
-  python mongo_migration/create_indexes.py
-
-# Compute narrator stats (required — not in JSONL files)
-MONGODB_URI_READ_WRITE=mongodb://localhost:27017/ DB_NAME=$DB \
-  python mongo_migration/processed_bukhari_podia/compute_stats.py
-```
+Imports all JSONL files + indexes + stats + topics + embeddings in one command.
 
 ### Tests
 
 ```bash
 PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 "$PYTHON" -m pytest tests/ -v
-```
-
-### Docker
-
-```bash
-# Build image
-docker build -t hadathna-api .
-
-# Run container (pass env vars at runtime, never bake into image)
-docker run -p 8000:8000 \
-  -e MONGODB_URI_READ="mongodb+srv://<user>:<pass>@<cluster>.mongodb.net/" \
-  -e DB_NAME="HadithData" \
-  -e CORS_ORIGINS="*" \
-  hadathna-api
 ```
 
 ### MongoDB Data Pipeline (Shamela)
@@ -369,10 +390,10 @@ When enriching or modifying data (adding fields, new embeddings, topic tags, etc
 1. **Write/update the script** — new enrichment → new file under `scripts/`; schema change → update preprocessing script + `app/models/`
 2. **Pull latest data from R2** — `python scripts/r2_sync/pull_snapshot.py --dataset bukhari_podia --latest`
 3. **Run against `HadithDataDev` first** — `APP_ENV=dev` must be set in `.env`
-4. **Verify in dev** — test endpoints on port 8001, run `pytest`
+4. **Verify in dev** — test endpoints on port 8000, run `pytest`
 5. **Push enriched JSONL to R2** — `python scripts/r2_sync/push_snapshot.py --dataset bukhari_podia --source mongo_migration/processed_bukhari_podia/ --extensions jsonl`
 6. **Promote to prod (Atlas)** — re-run `upload.py` against Atlas or use `mongodump`/`mongorestore`
-7. **Restart prod** — in `tmux hadathana_deployment` with `APP_ENV=prod`
+7. **Restart API** — `docker compose restart api`
 
 ### Change detection workflow
 
