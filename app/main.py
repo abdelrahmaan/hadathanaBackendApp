@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import settings
-from .database import connect, disconnect
+from .database import connect, disconnect, validate_connection, get_client, get_db_status
 from .logging_config import setup_logging
 from .middleware import RequestLoggingMiddleware
 from .routers import hadiths_shamela, narrators_shamela, hadiths_podia, narrators_podia, search_podia
@@ -21,6 +21,7 @@ logger = logging.getLogger("hadathana.main")
 async def lifespan(app: FastAPI):
     logger.info("startup", extra={"event": "startup"})
     await connect()
+    await validate_connection()
     yield
     await disconnect()
     logger.info("shutdown", extra={"event": "shutdown"})
@@ -62,4 +63,21 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 @app.get("/health", tags=["health"])
 async def health():
-    return {"status": "ok"}
+    result = {"status": "ok", "mongodb": "unknown"}
+
+    client = get_client()
+    try:
+        await client.admin.command("ping")
+        result["mongodb"] = "connected"
+    except Exception:
+        result["mongodb"] = "disconnected"
+        result["status"] = "degraded"
+
+    db_status = get_db_status()
+    if db_status:
+        result["collections"] = db_status.get("collections", {})
+        if db_status.get("empty_collections"):
+            result["status"] = "degraded"
+            result["warning"] = f"Empty/missing collections: {', '.join(db_status['empty_collections'])}"
+
+    return result

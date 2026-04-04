@@ -17,6 +17,7 @@ async def client():
 
     with patch("app.database.connect", new_callable=AsyncMock), \
          patch("app.database.disconnect", new_callable=AsyncMock), \
+         patch("app.database.validate_connection", new_callable=AsyncMock), \
          patch("app.database.get_client", return_value=mock_client), \
          patch("app.database.get_db", return_value=mock_db), \
          patch("app.database.get_hadiths_collection", return_value=mock_collection), \
