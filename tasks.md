@@ -455,3 +455,22 @@
 - `mongo_migration/processed_bukhari_shamela/compute_stats.py`
 - `CLAUDE.md`
 - `tasks.md`
+
+### chore: update README.md with dev/prod workflow and feature branch workflow (2026-04-06)
+**Status**: done
+**Summary**: Rewrote Quick Start, Environments table, and added Feature Development Workflow section with step-by-step git branch → dev test → merge main → make prod promotion. Replaced all tmux/Atlas references with Makefile commands. Updated Data Update Workflow promote-to-prod step. Added note to Railway/Render section that project currently runs on VPS.
+**Touched files**:
+- `README.md`
+- `tasks.md`
+
+### chore: dev/prod Docker Compose separation (2026-04-06)
+**Status**: done
+**Summary**: Split single docker-compose.yml into base + override (dev) + prod files using Docker Compose file merging. Both stacks run simultaneously on the same VPS — dev on port 8001 (with live reload, exposed MongoDB), prod on port 8000 (code baked into image, MongoDB internal-only). Separate volumes (`hadathana_mongodb_dev` / `hadathana_mongodb_prod`), container names (`*-dev` / `*-prod`), and databases (`HadithDataDev` / `HadithData`). Added Makefile for shorthand commands (`make dev`, `make prod`, `make health`). Updated config.py to default `mongodb_uri_read` to empty string (Atlas unreachable) and fall back to local URI. Promotion workflow: develop on dev → commit → `make prod` rebuilds image and restarts prod.
+**Touched files**:
+- `docker-compose.yml` (rewritten as base skeleton — no env-specific values)
+- `docker-compose.override.yml` (new — dev config, auto-loaded)
+- `docker-compose.prod.yml` (new — prod config, explicit `-f` required)
+- `app/config.py` (mongodb_uri_read default to "", simplified get_mongodb_uri)
+- `Makefile` (new — dev/prod/status/health convenience targets)
+- `CLAUDE.md` (rewritten Docker section with dev/prod allocation table, Makefile commands, promotion workflow)
+- `tasks.md`

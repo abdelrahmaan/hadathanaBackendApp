@@ -5,8 +5,8 @@ class Settings(BaseSettings):
     # Environment: "dev" or "prod"
     app_env: str = "prod"
 
-    # MongoDB — cloud (prod)
-    mongodb_uri_read: str
+    # MongoDB — cloud (prod, currently unused — Atlas unreachable since 2026-04-01)
+    mongodb_uri_read: str = ""
     db_name: str = "HadithData"
 
     # MongoDB — local (dev)
@@ -28,7 +28,9 @@ class Settings(BaseSettings):
         return self.app_env == "dev"
 
     def get_mongodb_uri(self) -> str:
-        return self.mongodb_uri_local if self.is_dev else self.mongodb_uri_read
+        # Both dev and prod use local Docker MongoDB (Atlas unreachable since 2026-04-01).
+        # URI is always injected by docker-compose via MONGODB_URI_LOCAL env var.
+        return self.mongodb_uri_local
 
     def get_db_name(self) -> str:
         return self.db_name_dev if self.is_dev else self.db_name

@@ -7,87 +7,110 @@ FastAPI + MongoDB backend for the Hadathana Islamic hadith app. Exposes Sahih al
 ## Quick Start
 
 ```bash
-PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
-
 # 1. Copy env template and fill in credentials
 cp .env.example .env
 
-# 2. Start local MongoDB (Docker)
-docker start mongodb-hadathana   # or: docker run -d --name mongodb-hadathana -p 27017:27017 -v mongodb_hadathana_data:/data/db mongo:8
+# 2. Start the dev stack (MongoDB + bootstrap + API on port 8001)
+make dev
 
-# 3. Run dev server (APP_ENV=dev in .env)
-"$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+# 3. Verify
+curl http://localhost:8001/health
 ```
 
-API docs: http://localhost:8001/docs
+API docs: http://localhost:8001/docs (dev) / http://localhost:8000/docs (prod)
 
 ---
 
 ## Environments
 
-Two environments controlled by `APP_ENV` in `.env`:
+Both dev and prod run on the same VPS using Docker Compose file merging.
 
-| `APP_ENV` | MongoDB | Database | Port | CORS |
-|---|---|---|---|---|
-| `dev` | Local Docker (`mongodb://localhost:27017/`) | `HadithDataDev` | 8001 | localhost |
-| `prod` | Atlas cloud (`MONGODB_URI_READ`) | `HadithData` | 8000 | hadathana.app |
-
-**Production runs in `tmux hadathana_deployment`** on port 8000. Never restart it without verifying `APP_ENV=prod`.
+| | Dev | Prod |
+|---|---|---|
+| API port | `8001` | `8000` |
+| MongoDB port | `27017` (exposed) | internal only |
+| Database | `HadithDataDev` | `HadithData` |
+| Volume | `hadathana_mongodb_dev` | `hadathana_mongodb_prod` |
+| Code reload | live (`--reload` + volume mount) | baked into image |
+| Start command | `make dev` | `make prod` |
 
 ---
 
-## Setup — Local MongoDB
+## Docker Compose Commands
 
 ```bash
-# Start container
-docker start mongodb-hadathana
+make dev          # start dev stack (port 8001)
+make prod         # build image + start prod stack (port 8000)
+make dev-logs     # follow dev API logs
+make prod-logs    # follow prod API logs
+make dev-down     # stop dev stack
+make prod-down    # stop prod stack
+make status       # show both stacks
+make health       # health check both APIs
+```
 
-# Bootstrap a database (run for both HadithData and HadithDataDev)
-DB=HadithDataDev
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_books \
-  < mongo_migration/processed_bukhari_podia/bukhari_podia_hadiths.jsonl
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_narrators \
-  < mongo_migration/processed_bukhari_podia/bukhari_podia_narrators.jsonl
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection processed_podia_narrator_biographies \
-  < mongo_migration/processed_bukhari_podia/bukhari_narrators_tarajem.jsonl
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection raw_shamela_books \
-  < mongo_migration/processed_bukhari_shamela/preprocessed_bukhari.jsonl
-docker exec -i mongodb-hadathana mongoimport --db $DB --collection raw_shamela_narrators \
-  < mongo_migration/processed_bukhari_shamela/narrators.jsonl
+On first run, `mongo-init` auto-bootstraps the database from JSONL files. Subsequent starts skip bootstrap if data already exists (<1s).
 
-# Create indexes
-MONGODB_URI_READ_WRITE=mongodb://localhost:27017/ DB_NAME=$DB \
-  python mongo_migration/create_indexes.py
+---
 
-# Compute narrator stats (not in JSONL — must be derived)
-MONGODB_URI_READ_WRITE=mongodb://localhost:27017/ DB_NAME=$DB \
-  python mongo_migration/processed_bukhari_podia/compute_stats.py
+## Feature Development Workflow
+
+All development happens on the VPS. Dev (`:8001`) is your staging — prod (`:8000`) is only touched on promotion.
+
+```
+feat branch  →  dev :8001  →  validate  →  merge main  →  make prod :8000
+```
+
+### 1. Create a feature branch
+
+```bash
+git checkout main
+git checkout -b feat_your_feature
+```
+
+### 2. Develop and test on dev
+
+```bash
+make dev          # already running? skip this
+# edit code in app/ — live reload picks up changes instantly
+# test at http://<vps-ip>:8001
+```
+
+### 3. Merge to main and promote to prod
+
+```bash
+git checkout main
+git merge feat_your_feature
+make prod         # rebuilds image from main, restarts prod on :8000
+```
+
+Prod rebuild takes ~20-30 seconds. Users see no downtime during the build; the old container keeps serving until the new one is ready.
+
+### 4. Rollback if something breaks
+
+```bash
+git checkout <last-good-commit>
+make prod         # rebuilds from rolled-back code
 ```
 
 ---
 
-## Populate Atlas (Production)
+## Bootstrap (manual / recovery)
+
+`mongo-init` handles this automatically on `make dev` / `make prod`. For manual recovery:
 
 ```bash
 PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 
-# Shamela pipeline
-"$PYTHON" mongo_migration/processed_bukhari_shamela/preprocess_pages.py
-"$PYTHON" mongo_migration/processed_bukhari_shamela/preprocess_hadiths.py
-"$PYTHON" mongo_migration/upload.py
-"$PYTHON" mongo_migration/create_indexes.py
-"$PYTHON" mongo_migration/processed_bukhari_shamela/compute_stats.py
+# Bootstrap HadithDataDev (skips if data already exists)
+"$PYTHON" scripts/bootstrap_local_db.py
 
-# Podia pipeline
-"$PYTHON" mongo_migration/processed_bukhari_podia/preprocess.py
-"$PYTHON" mongo_migration/upload.py
-"$PYTHON" mongo_migration/create_indexes.py
-"$PYTHON" mongo_migration/processed_bukhari_podia/compute_stats.py
+# Bootstrap HadithData (prod DB)
+"$PYTHON" scripts/bootstrap_local_db.py --db HadithData
+
+# Force re-import
+"$PYTHON" scripts/bootstrap_local_db.py --force
 ```
-
-Collections populated:
-- **Shamela**: `raw_shamela_books`, `raw_shamela_narrators`, `raw_shamela_hadith_pages`, `analytics_narrator_stats_shamela`
-- **Podia**: `processed_podia_books`, `raw_podia_books`, `processed_podia_narrators`, `processed_podia_narrator_biographies`, `analytics_narrator_stats_podia`
 
 ---
 
@@ -318,32 +341,28 @@ python scripts/r2_sync/push_snapshot.py --dataset bukhari_podia \
   --source mongo_migration/processed_bukhari_podia/ --extensions jsonl
 ```
 
-**6. Promote to prod (Atlas)**
+**6. Promote to prod**
 ```bash
-# Option A — re-run upload against Atlas
-MONGODB_URI_READ_WRITE=<atlas_uri> DB_NAME=HadithData python mongo_migration/upload.py
-
-# Option B — mongodump from local dev, mongorestore to Atlas
-mongodump --uri mongodb://localhost:27017/ --db HadithDataDev --out /tmp/dump
-mongorestore --uri <atlas_uri> --db HadithData /tmp/dump/HadithDataDev
+# mongodump from dev, mongorestore to prod
+docker exec hadathana-mongo-dev mongodump --db HadithDataDev --out /tmp/dump
+docker exec hadathana-mongo-prod mongorestore --db HadithData /tmp/dump/HadithDataDev
 ```
 
-**7. Restart prod**
+**7. Restart prod API**
 ```bash
-# In tmux hadathana_deployment — make sure APP_ENV=prod in .env
-# Ctrl+C, then:
-/home/abdo_kamar/Projects/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+make prod-restart
 ```
 
 ---
 
 ## Deploy to Railway / Render
 
+> Currently running on a VPS with local Docker MongoDB. These steps apply if migrating to a cloud platform.
+
 1. Push repo to GitHub
 2. Create project on Railway or Render, connect the repo
 3. Set env vars in the platform dashboard (see `.env.example`)
-4. In MongoDB Atlas → **Network Access** → allow `0.0.0.0/0`
-5. Platform auto-detects `Dockerfile` and deploys
+4. Platform auto-detects `Dockerfile` and deploys
 
 ---
 

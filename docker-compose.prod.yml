@@ -1,0 +1,36 @@
+# docker-compose.prod.yml — Production environment (explicit load required)
+#
+# Usage: docker compose -p hadathana-prod -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#    or: make prod
+#
+# API on port 8000, MongoDB NOT exposed to host
+# Code baked into image (no volume mounts, no --reload)
+# Database: HadithData
+
+services:
+  mongo:
+    container_name: hadathana-mongo-prod
+    # No ports: MongoDB is internal-only in production
+
+  mongo-init:
+    container_name: hadathana-init-prod
+    command: >
+      python scripts/bootstrap_local_db.py
+      --db HadithData
+      --uri mongodb://mongo:27017/
+
+  api:
+    container_name: hadathana-api-prod
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=prod
+      - MONGODB_URI_LOCAL=mongodb://mongo:27017/
+      - DB_NAME=HadithData
+      - CORS_ORIGINS=https://hadathana.app,https://www.hadathana.app,http://localhost:3000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    # No volume mounts — code is baked into the Docker image
+
+volumes:
+  mongodb_data:
+    name: hadathana_mongodb_prod

@@ -94,87 +94,109 @@ Future (not yet populated):
 
 ## Common Commands
 
-### Docker Compose (production & development)
+### Docker Compose (dev & prod)
 
-**`docker compose` is the single entry point** for the entire backend stack. It manages MongoDB, data bootstrapping, and the API server.
+The project uses Docker Compose with file merging to run **dev and prod simultaneously** on the same VPS:
 
-#### Everyday commands
+| File | Purpose | Loaded by |
+|------|---------|-----------|
+| `docker-compose.yml` | Shared skeleton | Always |
+| `docker-compose.override.yml` | Dev config | Auto-loaded by `docker compose up` |
+| `docker-compose.prod.yml` | Prod config | Explicit: `-f ... -f ...` or `make prod` |
+
+#### Environment allocation
+
+| | Dev | Prod |
+|---|---|---|
+| API port | 8001 | 8000 |
+| MongoDB port | 27017 (exposed) | internal only |
+| Database | `HadithDataDev` | `HadithData` |
+| Volume | `hadathana_mongodb_dev` | `hadathana_mongodb_prod` |
+| Containers | `hadathana-*-dev` | `hadathana-*-prod` |
+| Code reload | Yes (`--reload` + volume mount) | No (baked into image) |
+
+#### Everyday commands (via Makefile)
 
 ```bash
-# Start the full stack (detached — runs in background)
-docker compose up -d
+# ── Dev ───────────────────────────────────────
+make dev              # start dev stack (API on :8001)
+make dev-logs         # follow dev API logs
+make dev-down         # stop dev stack
+make dev-ps           # check dev service status
 
-# Follow logs (all services)
-docker compose logs -f
+# ── Prod ──────────────────────────────────────
+make prod             # build + start prod stack (API on :8000)
+make prod-logs        # follow prod API logs
+make prod-down        # stop prod stack
+make prod-ps          # check prod service status
+make prod-restart     # restart prod API only
 
-# Follow logs (API only)
-docker compose logs -f api
+# ── Both ──────────────────────────────────────
+make status           # show both stacks
+make health           # health check both APIs
 
-# Restart API after code changes (no rebuild needed — app/ is volume-mounted)
-docker compose restart api
-
-# Rebuild after changing requirements.txt or Dockerfile
-docker compose up -d --build
-
-# Stop everything (data persists in named volume)
-docker compose down
-
-# Check service status
-docker compose ps
-
-# Shell into a running container
-docker exec -it hadathana-api sh
-docker exec -it mongodb-hadathana mongosh HadithDataDev
+# ── Raw commands (equivalent to Makefile) ─────
+docker compose up -d                                    # dev
+docker compose -p hadathana-prod -f docker-compose.yml -f docker-compose.prod.yml up -d --build  # prod
 ```
 
-#### What happens on `docker compose up`
+#### Shell into containers
 
-1. **`mongo`** starts with a named volume (`mongodb_hadathana_data`) — data survives `docker compose down` and restarts
-2. **`mongo-init`** checks if `HadithDataDev` is empty — if so, imports all JSONL files + creates indexes + computes stats + applies topics & embeddings. If data exists, exits in <1s.
-3. **`api`** starts on port 8000, connects to MongoDB, validates all collections at startup, logs ERROR if any are missing/empty
+```bash
+# Dev
+docker exec -it hadathana-api-dev sh
+docker exec -it hadathana-mongo-dev mongosh HadithDataDev
+
+# Prod
+docker exec -it hadathana-api-prod sh
+docker exec -it hadathana-mongo-prod mongosh HadithData
+```
+
+#### What happens on startup
+
+1. **`mongo`** starts with a named volume — data survives `docker compose down` and restarts
+2. **`mongo-init`** checks if the target database is empty — if so, imports all JSONL files + creates indexes + computes stats + applies topics & embeddings. If data exists, exits in <1s.
+3. **`api`** starts, connects to MongoDB, validates all collections at startup, logs ERROR if any are missing/empty
 
 #### Health check
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8001/health   # dev
+curl http://localhost:8000/health   # prod
 # Returns: {"status":"ok","mongodb":"connected","collections":{"processed_podia_books":7076,...}}
-# Returns: {"status":"degraded",...} if MongoDB is down or collections are empty
+```
+
+#### Promotion workflow (dev → prod)
+
+```bash
+# 1. Develop and test in dev (live reload on :8001)
+make dev
+
+# 2. Once satisfied, commit and rebuild prod
+git add . && git commit -m "feat: ..."
+make prod    # rebuilds image with new code, restarts prod on :8000
+
+# 3. Rollback if needed
+git checkout <good-commit>
+make prod    # rebuilds from the rolled-back code
 ```
 
 #### Data safety
 
 ```bash
-# ⚠️ These commands DESTROY ALL MongoDB data:
-docker compose down -v         # removes volumes
-docker volume prune            # removes unused volumes
-docker volume rm mongodb_hadathana_data  # removes the specific volume
+# ⚠️ These commands DESTROY MongoDB data:
+docker compose down -v                    # dev volume
+make prod-down && docker volume rm hadathana_mongodb_prod  # prod volume
 
 # If data is lost, just restart — mongo-init will auto-bootstrap from JSONL files:
-docker compose up -d
+make dev   # or make prod
 ```
 
 #### Adding future services
 
-Add new services to `docker-compose.yml`. Commented-out templates for Qdrant and mongo-express are already included. Examples:
+Add new services to `docker-compose.yml` (base). Commented-out templates for Qdrant and mongo-express are already included.
 
-```bash
-# After uncommenting a service in docker-compose.yml:
-docker compose up -d           # starts new service alongside existing ones
-docker compose logs -f qdrant  # follow its logs
-```
-
-### Environment Configuration
-
-| `APP_ENV` | MongoDB URI | Database | Port | CORS |
-|---|---|---|---|---|
-| `dev` | `MONGODB_URI_LOCAL` (Docker) | `HadithDataDev` | 8000 | localhost origins |
-| `prod` | `MONGODB_URI_READ` (Atlas) | `HadithData` | 8000 | production origins |
-
-The API always runs on port 8000. `APP_ENV` controls which MongoDB URI and database name to use. Currently set to `dev` in `docker-compose.yml` (Atlas unreachable since 2026-04-01).
-
-To switch to prod (Atlas): change `APP_ENV=dev` → `APP_ENV=prod` in docker-compose.yml, then `docker compose restart api`.
-
-API docs: http://localhost:8000/docs
+API docs: http://localhost:8001/docs (dev) / http://localhost:8000/docs (prod)
 
 ### Bootstrap script (standalone)
 

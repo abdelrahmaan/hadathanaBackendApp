@@ -1,28 +1,14 @@
-# docker-compose.yml — Full application stack
+# docker-compose.yml — Base configuration (shared by dev and prod)
 #
-# This is the single entry point for running the hadathana backend.
-# It manages MongoDB, data bootstrapping, and the API server.
+# Dev:  docker compose up -d                    (auto-loads override)
+# Prod: docker compose -p hadathana-prod -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
-# Usage:
-#   docker compose up -d           # start all services (detached)
-#   docker compose logs -f api     # follow API logs
-#   docker compose logs -f         # follow all logs
-#   docker compose restart api     # restart API (e.g. after code change)
-#   docker compose down            # stop everything (data persists in volume)
-#   docker compose down -v         # ⚠️ DESTROYS ALL DATA — use only to full reset
-#
-# The mongo-init service auto-bootstraps if the database is empty.
-# On normal restarts it detects existing data and exits in <1s.
-#
-# To add future services (monitoring, vector DB, etc.), add them below.
+# See also: Makefile for shorthand commands.
 
 services:
   # ── Database ──────────────────────────────────────────────────
   mongo:
     image: mongo:8
-    container_name: mongodb-hadathana
-    ports:
-      - "27017:27017"
     volumes:
       - mongodb_data:/data/db
     healthcheck:
@@ -37,8 +23,6 @@ services:
   # topics + embeddings. Skips everything if data already exists.
   mongo-init:
     build: .
-    container_name: hadathana-mongo-init
-    command: python scripts/bootstrap_local_db.py --db HadithDataDev --uri mongodb://mongo:27017/
     working_dir: /app
     volumes:
       - ./scripts:/app/scripts:ro
@@ -53,19 +37,8 @@ services:
   # ── API server ────────────────────────────────────────────────
   api:
     build: .
-    container_name: hadathana-api
-    ports:
-      - "8000:8000"
-    environment:
-      - APP_ENV=dev
-      - MONGODB_URI_LOCAL=mongodb://mongo:27017/
-      - DB_NAME_DEV=HadithDataDev
-      - CORS_ORIGINS_DEV=http://localhost:3000,http://localhost:5173
     env_file:
       - .env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    volumes:
-      - ./app:/app/app
     depends_on:
       mongo:
         condition: service_healthy
@@ -94,10 +67,3 @@ services:
   #     mongo:
   #       condition: service_healthy
   #   restart: unless-stopped
-
-volumes:
-  mongodb_data:
-    name: mongodb_hadathana_data
-    external: true
-  # qdrant_data:
-  #   name: hadathana_qdrant_data

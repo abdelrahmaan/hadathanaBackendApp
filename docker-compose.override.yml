@@ -1,0 +1,35 @@
+# docker-compose.override.yml — Dev environment (auto-loaded by `docker compose up`)
+#
+# API on port 8001, MongoDB on 27017 (exposed for debugging)
+# Live code reload via volume mount + --reload flag
+# Database: HadithDataDev
+
+services:
+  mongo:
+    container_name: hadathana-mongo-dev
+    ports:
+      - "27017:27017"
+
+  mongo-init:
+    container_name: hadathana-init-dev
+    command: >
+      python scripts/bootstrap_local_db.py
+      --db HadithDataDev
+      --uri mongodb://mongo:27017/
+
+  api:
+    container_name: hadathana-api-dev
+    ports:
+      - "8001:8001"
+    environment:
+      - APP_ENV=dev
+      - MONGODB_URI_LOCAL=mongodb://mongo:27017/
+      - DB_NAME_DEV=HadithDataDev
+      - CORS_ORIGINS_DEV=http://localhost:3000,http://localhost:5173
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+    volumes:
+      - ./app:/app/app
+
+volumes:
+  mongodb_data:
+    name: hadathana_mongodb_dev
