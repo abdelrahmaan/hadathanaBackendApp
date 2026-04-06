@@ -6,6 +6,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from prometheus_fastapi_instrumentator import Instrumentator
+
 from .config import settings
 from .database import connect, disconnect, validate_connection, get_client, get_db_status
 from .logging_config import setup_logging
@@ -44,6 +46,8 @@ app.include_router(narrators_shamela.router)
 app.include_router(hadiths_podia.router)
 app.include_router(narrators_podia.router)
 app.include_router(search_podia.router)
+
+Instrumentator().instrument(app).expose(app)
 
 
 @app.exception_handler(Exception)

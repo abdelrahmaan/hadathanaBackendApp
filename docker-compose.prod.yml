@@ -31,6 +31,13 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
     # No volume mounts — code is baked into the Docker image
 
+  prometheus:
+    container_name: hadathana-prometheus-prod
+    ports:
+      - "9091:9090"
+
 volumes:
   mongodb_data:
     name: hadathana_mongodb_prod
+  prometheus_data:
+    name: hadathana_prometheus_prod

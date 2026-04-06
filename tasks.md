@@ -224,7 +224,11 @@
 - [ ] Deploy backend to cloud (Railway / Render / AWS)
 - [ ] Deploy frontend to Vercel
 - [ ] Error tracking (Sentry or similar)
-- [ ] Performance monitoring and alerting
+- [x] Prometheus metrics (Phase 1) — request rate, latency, error rate via `/metrics`
+- [ ] Grafana dashboards (Phase 2)
+- [ ] Loki + Promtail log aggregation (Phase 3)
+- [ ] Langfuse LLM observability (Phase 4)
+- [ ] Alerting (Phase 6)
 - [x] Logging infrastructure
 
 ---
@@ -251,6 +255,19 @@
 ---
 
 ## Chore Log
+
+### feat: Prometheus metrics monitoring — Phase 1 (2026-04-06)
+**Status**: done
+**Summary**: Added Prometheus metrics to FastAPI via `prometheus-fastapi-instrumentator`. The `/metrics` endpoint exposes RED metrics (request rate, error rate, duration/latency), Python process metrics (memory, CPU, GC), and per-handler breakdowns. Added Prometheus container to Docker Compose (dev on :9090, prod on :9091). Separate Prometheus configs for dev (scrapes api:8001) and prod (scrapes api:8000). Named volumes for metric retention (30 days).
+**Touched files**:
+- `requirements.txt` (added `prometheus-client`, `prometheus-fastapi-instrumentator`)
+- `app/main.py` (added `Instrumentator().instrument(app).expose(app)`)
+- `monitoring/prometheus.yml` (new — prod Prometheus config)
+- `monitoring/prometheus.dev.yml` (new — dev Prometheus config, targets api:8001)
+- `docker-compose.yml` (added `prometheus` service)
+- `docker-compose.override.yml` (Prometheus dev port 9090, dev config override, dev volume)
+- `docker-compose.prod.yml` (Prometheus prod port 9091, prod volume)
+- `tasks.md`
 
 ### feat: Arabic search normalization — _search fields + normalized query pipeline (2026-04-06)
 **Status**: done

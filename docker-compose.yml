@@ -47,6 +47,20 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # ── Monitoring ─────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
   # ── Future services ───────────────────────────────────────────
   # Uncomment and configure as needed:
   #

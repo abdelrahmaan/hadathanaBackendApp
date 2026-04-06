@@ -30,6 +30,16 @@ services:
     volumes:
       - ./app:/app/app
 
+  prometheus:
+    container_name: hadathana-prometheus-dev
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
 volumes:
   mongodb_data:
     name: hadathana_mongodb_dev
+  prometheus_data:
+    name: hadathana_prometheus_dev
