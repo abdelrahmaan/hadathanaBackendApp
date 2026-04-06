@@ -164,6 +164,21 @@ curl http://localhost:8000/api/v2/topics
 curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
 ```
 
+Search is normalization-tolerant — these all return the same results:
+```bash
+# taa marbuta: الصلاه = الصلاة
+curl "http://localhost:8000/api/v2/hadiths?hadith_text_plain=الصلاه"
+curl "http://localhost:8000/api/v2/hadiths?hadith_text_plain=الصلاة"
+
+# hamza: ابراهيم = إبراهيم
+curl "http://localhost:8000/api/v1/narrators?name_plain=ابراهيم"
+curl "http://localhost:8000/api/v1/narrators?name_plain=إبراهيم"
+
+# alef maqsura: موسي = موسى
+curl "http://localhost:8000/api/v2/narrators?full_name_plain=موسي"
+curl "http://localhost:8000/api/v2/narrators?full_name_plain=موسى"
+```
+
 ---
 
 ## Data Field Comparison
@@ -174,7 +189,9 @@ curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
 |-------|:---:|:---:|-------|
 | `hadith_index` / `hadith_indices` | ✅ single int | ✅ list | Podia hadiths can span multiple indices |
 | `hadith` / `hadith_text` | ✅ | ✅ | Full text with tashkeel |
-| `hadith_plain` / `hadith_text_plain` | ✅ | ✅ | Tashkeel stripped, for search |
+| `hadith_plain` / `hadith_text_plain` | ✅ | ✅ | Tashkeel stripped |
+| `hadith_search` / `hadith_text_search` | ✅ | ✅ | Fully normalized for search (see below) |
+| `sanad_text_search`, `matn_text_search` | ❌ | ✅ | Normalized sanad/matn search fields |
 | `book`, `chapter` | ❌ | ✅ | |
 | `hadith_url` | ❌ | ✅ | Source URL |
 | `sanad_text`, `matn_text`, `tawabi_text` | ❌ | ✅ | Segmented text |
@@ -188,11 +205,27 @@ curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
 | Field | v1 Shamela | v2 Podia |
 |-------|:---:|:---:|
 | `name` / `name_in_chain` | ✅ | ✅ |
+| `name_search` / `name_in_chain_search` | ✅ | ✅ |
 | `full_name`, `full_name_plain` | ❌ | ✅ |
-| `rank`, `rank_plain` | ❌ | ✅ |
+| `full_name_search` | ❌ | ✅ |
 | `kunya`, `nasab`, `tabaqa` | ✅ | ❌ |
+| `kunya_search`, `nasab_search` | ✅ | ❌ |
+| `rank`, `rank_plain` | ❌ | ✅ |
 | `rank_ibn_hajar`, `rank_dhahabi` | ✅ | ❌ |
 | `jarh_wa_tadil[]` | ✅ | via `/tarajem` |
+
+### Arabic Search Normalization
+
+All text search parameters are normalized before querying, and all `_search` fields in MongoDB are pre-normalized to the same form. This means variant spellings match automatically:
+
+| Variant typed | Matches data containing |
+|---|---|
+| `الصلاه` | `الصلاة` (taa marbuta ة → ه) |
+| `موسي` | `موسى` (alef maqsura ى → ي) |
+| `ابراهيم` | `إبراهيم` (hamza variants أ/إ/آ → ا) |
+| `ابوهريره` | `أبو هريرة` (hamza + taa marbuta combined) |
+
+Normalization applied: strip tashkeel, unify hamza variants (أ/إ/آ → ا, ؤ → و, ئ → ي), ة → ه, ى → ي, remove tatweel. Implemented in `app/normalization.py`.
 
 ---
 

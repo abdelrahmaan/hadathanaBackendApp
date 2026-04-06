@@ -168,10 +168,10 @@
 ## v1.4 - Arabic Text Normalization & Advanced Search
 
 ### Arabic Query Normalization (backend-only)
-- [ ] Implement `normalize_arabic_query(text)` utility: strip tashkeel, normalize alef variants (أ إ آ أ → ا), normalize ة → ه, normalize ى → ي, normalize hamzas (ؤ ئ → و ي), remove tatweel (ـ)
-- [ ] Apply normalization at query time on all search endpoints (`hadith_plain`, `name_plain`, `full_name_plain`)
-- [ ] Test: "أبو هريرة" and "ابوهريره" must return the same results
-- [ ] Affects: `app/routers/hadiths_shamela.py`, `app/routers/narrators_shamela.py`, `app/routers/hadiths_podia.py`, `app/routers/narrators_podia.py`
+- [x] Implement `normalize_arabic_query(text)` utility: strip tashkeel, normalize alef variants (أ إ آ أ → ا), normalize ة → ه, normalize ى → ي, normalize hamzas (ؤ ئ → و ي), remove tatweel (ـ)
+- [x] Apply normalization at query time on all search endpoints (`hadith_plain`, `name_plain`, `full_name_plain`)
+- [x] Test: "أبو هريرة" and "ابوهريره" must return the same results
+- [x] Affects: `app/routers/hadiths_shamela.py`, `app/routers/narrators_shamela.py`, `app/routers/hadiths_podia.py`, `app/routers/narrators_podia.py`
 
 ### Advanced / Fuzzy Search
 - [ ] Evaluate options: MongoDB Atlas Search (Lucene-based), n-gram index, normalized token matching
@@ -251,6 +251,28 @@
 ---
 
 ## Chore Log
+
+### feat: Arabic search normalization — _search fields + normalized query pipeline (2026-04-06)
+**Status**: done
+**Summary**: Implemented full Arabic query normalization for all 4 search endpoints. Extended `normalize_for_search()` with ة→ه (taa marbuta) and ى→ي (alef maqsura) mappings. Added `_search` fields to all preprocessing scripts (shamela hadiths, shamela narrators, podia hadiths, podia narrators). Updated all 4 routers to normalize the incoming query via `normalize_for_search()` + `re.escape()` and match against the `_search` field instead of `_plain`. Added `_search` indexes to `create_indexes.py`. Added optional `_search` fields to all 4 Pydantic response models. 22 unit tests in `tests/test_normalization.py` (TDD: red → green). API query param names are unchanged (backward-compatible).
+**Touched files**:
+- `normalization.py` (ة→ه, ى→ي added to `normalize_for_search()`)
+- `app/routers/hadiths_shamela.py` (normalize query, use `hadith_search` field)
+- `app/routers/hadiths_podia.py` (normalize query, use `hadith_text_search` field)
+- `app/routers/narrators_shamela.py` (normalize query, use `name_search`, `kunya_search`, `nasab_search`)
+- `app/routers/narrators_podia.py` (normalize query, use `full_name_search` field)
+- `app/models/hadith.py` (optional `hadith_search` field)
+- `app/models/hadith_podia.py` (optional `hadith_text_search`, `sanad_text_search`, `matn_text_search`)
+- `app/models/narrator.py` (optional `name_search`, `kunya_search`, `nasab_search`)
+- `app/models/narrator_podia.py` (optional `name_in_chain_search`, `full_name_search`)
+- `mongo_migration/processed_bukhari_shamela/preprocess_hadiths.py` (generate `hadith_search`)
+- `mongo_migration/processed_bukhari_shamela/preprocess_pages.py` (generate `name_search`, `kunya_search`, `nasab_search`)
+- `mongo_migration/processed_bukhari_podia/preprocess.py` (generate `hadith_text_search`, `sanad_text_search`, `matn_text_search`, `full_name_search`, `name_in_chain_search`)
+- `mongo_migration/create_indexes.py` (added `_search` field indexes for all collections)
+- `tests/test_normalization.py` (new — 22 unit tests)
+- `tasks.md`
+
+
 
 ### fix: restore HadithDataDev after mongoimport upsert wiped hadith data (2026-04-02)
 **Status**: done

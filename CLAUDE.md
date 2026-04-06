@@ -88,7 +88,8 @@ Future (not yet populated):
 **Text field hierarchy** (applies to both pipelines):
 - Raw fields: original text with tashkeel (e.g., `hadith_text`, `name_in_chain`)
 - `_clean` suffix: cleaned but preserves tashkeel
-- `_plain` suffix: cleaned + tashkeel stripped (for search/matching)
+- `_plain` suffix: cleaned + tashkeel stripped
+- `_search` suffix: fully normalized for search — tashkeel stripped + hamza unified (أ/إ/آ→ا, ؤ→و, ئ→ي) + ة→ه + ى→ي + tatweel removed. **Routers always query `_search` fields** (never `_plain`), so variant spellings match automatically. Implemented in `app/normalization.py`.
 
 **Narrator ID handling**: MongoDB stores both `int` and `string` variants - use `{"$in": [narrator_id, str(narrator_id)]}` for queries (see `app/routers/hadiths_shamela.py:40`)
 
@@ -336,11 +337,16 @@ All endpoints follow pagination pattern:
 - Default: `skip=0`, `limit=20` (max 100)
 - Returns `PaginatedHadiths` or `PaginatedNarrators` with `items[]` and `total`
 
-Filter params use MongoDB regex for text search:
+Filter params use normalized MongoDB regex for text search. Always query the `_search` field (not `_plain`), and normalize the user's query first:
 ```python
+from ..normalization import normalize_for_search
+import re
+
 if hadith_plain:
-    query_filter["hadith_plain"] = {"$regex": hadith_plain, "$options": "i"}
+    query_filter["hadith_search"] = {"$regex": re.escape(normalize_for_search(hadith_plain)), "$options": "i"}
 ```
+
+`re.escape()` prevents regex injection. `normalize_for_search()` handles: tashkeel, hamza variants, ة→ه, ى→ي, tatweel.
 
 ### MongoDB vs Neo4j Division
 

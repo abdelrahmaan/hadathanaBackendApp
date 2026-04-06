@@ -93,9 +93,6 @@ package-lock.json
 # Root-level enrichment output JSONL files
 /*.jsonl
 
-# Plan files (local planning artifacts)
-plan_*.md
-
 # Allow frontend source directories that match ignored names
 !frontend/src/data/
 !frontend/src/lib/
