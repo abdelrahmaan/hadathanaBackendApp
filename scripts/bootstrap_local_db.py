@@ -22,6 +22,9 @@ from dotenv import load_dotenv
 from pymongo import MongoClient, UpdateOne
 from pymongo.errors import BulkWriteError
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+from normalization import normalize_for_search
+
 load_dotenv()
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -163,6 +166,73 @@ def run_script(script_path: str, uri: str, db_name: str):
             print(f"  {line}")
 
 
+def _add_search_fields(client: MongoClient, db_name: str):
+    """
+    Derive _search fields from existing _plain fields via normalize_for_search().
+    Safe to re-run — overwrites existing _search values.
+    """
+    db = client[db_name]
+
+    def _bulk(col, ops, label):
+        if ops:
+            result = col.bulk_write(ops, ordered=False)
+            print(f"  {label}: {result.modified_count} docs")
+
+    # processed_podia_books
+    col = db["processed_podia_books"]
+    ops = []
+    for doc in col.find({}, {"hadith_text_plain": 1, "sanad_text_plain": 1, "matn_text_plain": 1}):
+        ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": {
+            "hadith_text_search": normalize_for_search(doc.get("hadith_text_plain") or ""),
+            "sanad_text_search":  normalize_for_search(doc.get("sanad_text_plain") or ""),
+            "matn_text_search":   normalize_for_search(doc.get("matn_text_plain") or ""),
+        }}))
+        if len(ops) >= BATCH_SIZE:
+            _bulk(col, ops, "processed_podia_books (batch)")
+            ops = []
+    _bulk(col, ops, "processed_podia_books")
+
+    # raw_shamela_books
+    col = db["raw_shamela_books"]
+    ops = []
+    for doc in col.find({}, {"hadith_plain": 1}):
+        ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": {
+            "hadith_search": normalize_for_search(doc.get("hadith_plain") or ""),
+        }}))
+        if len(ops) >= BATCH_SIZE:
+            _bulk(col, ops, "raw_shamela_books (batch)")
+            ops = []
+    _bulk(col, ops, "raw_shamela_books")
+
+    # raw_shamela_narrators
+    col = db["raw_shamela_narrators"]
+    ops = []
+    for doc in col.find({}, {"name_plain": 1, "kunya": 1, "nasab": 1}):
+        upd = {"name_search": normalize_for_search(doc.get("name_plain") or "")}
+        if doc.get("kunya"):
+            upd["kunya_search"] = normalize_for_search(doc["kunya"])
+        if doc.get("nasab"):
+            upd["nasab_search"] = normalize_for_search(doc["nasab"])
+        ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": upd}))
+        if len(ops) >= BATCH_SIZE:
+            _bulk(col, ops, "raw_shamela_narrators (batch)")
+            ops = []
+    _bulk(col, ops, "raw_shamela_narrators")
+
+    # processed_podia_narrators
+    col = db["processed_podia_narrators"]
+    ops = []
+    for doc in col.find({}, {"name_in_chain_plain": 1, "full_name_plain": 1}):
+        ops.append(UpdateOne({"_id": doc["_id"]}, {"$set": {
+            "name_in_chain_search": normalize_for_search(doc.get("name_in_chain_plain") or ""),
+            "full_name_search":     normalize_for_search(doc.get("full_name_plain") or ""),
+        }}))
+        if len(ops) >= BATCH_SIZE:
+            _bulk(col, ops, "processed_podia_narrators (batch)")
+            ops = []
+    _bulk(col, ops, "processed_podia_narrators")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Bootstrap local MongoDB from JSONL files")
     parser.add_argument("--db", default="HadithDataDev", help="Target database name")
@@ -217,6 +287,10 @@ def main():
     print("\n=== Step 5: Apply enrichments (topics, embeddings) ===")
     for jsonl_path, collection_name, match_key, field_name in ENRICHMENTS:
         apply_enrichment(client, args.db, jsonl_path, collection_name, match_key, field_name)
+
+    # Step 6: Add _search fields (normalized versions of _plain fields for fuzzy search)
+    print("\n=== Step 6: Add _search fields ===")
+    _add_search_fields(client, args.db)
 
     # Summary
     print("\n=== Summary ===")
