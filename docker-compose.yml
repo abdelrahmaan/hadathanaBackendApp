@@ -61,6 +61,19 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3002}
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
   # ── Future services ───────────────────────────────────────────
   # Uncomment and configure as needed:
   #

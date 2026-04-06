@@ -225,7 +225,7 @@
 - [ ] Deploy frontend to Vercel
 - [ ] Error tracking (Sentry or similar)
 - [x] Prometheus metrics (Phase 1) — request rate, latency, error rate via `/metrics`
-- [ ] Grafana dashboards (Phase 2)
+- [x] Grafana dashboards (Phase 2) — API Overview dashboard with 11 panels
 - [ ] Loki + Promtail log aggregation (Phase 3)
 - [ ] Langfuse LLM observability (Phase 4)
 - [ ] Alerting (Phase 6)
@@ -255,6 +255,18 @@
 ---
 
 ## Chore Log
+
+### feat: Grafana dashboards — Phase 2 monitoring (2026-04-06)
+**Status**: done
+**Summary**: Added Grafana with auto-provisioned Prometheus datasource and pre-built "Hadathana API Overview" dashboard. Dashboard has 11 panels: request rate (total + by endpoint), error rate (5xx/total), response latency (p50/p95/p99), latency by endpoint (p95), requests in progress, response size by endpoint, Python process memory (RSS + virtual), and 4 stat panels (total requests, current req/s, avg latency, RSS memory) with color-coded thresholds. Grafana container added to dev (port 3000) and prod (port 3001). Dashboard and datasource provisioned via files — no manual setup needed.
+**Touched files**:
+- `monitoring/grafana/provisioning/datasources/prometheus.yml` (new — Prometheus datasource with fixed UID)
+- `monitoring/grafana/provisioning/dashboards/dashboards.yml` (new — dashboard file provider)
+- `monitoring/grafana/dashboards/api-overview.json` (new — 11-panel API dashboard)
+- `docker-compose.yml` (added `grafana` service)
+- `docker-compose.override.yml` (Grafana dev port 3000, dev volume)
+- `docker-compose.prod.yml` (Grafana prod port 3001, prod volume)
+- `tasks.md`
 
 ### feat: Prometheus metrics monitoring — Phase 1 (2026-04-06)
 **Status**: done

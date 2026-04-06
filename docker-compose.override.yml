@@ -38,8 +38,15 @@ services:
       - ./monitoring/prometheus.dev.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
 
+  grafana:
+    container_name: hadathana-grafana-dev
+    ports:
+      - "3002:3000"
+
 volumes:
   mongodb_data:
     name: hadathana_mongodb_dev
   prometheus_data:
     name: hadathana_prometheus_dev
+  grafana_data:
+    name: hadathana_grafana_dev
