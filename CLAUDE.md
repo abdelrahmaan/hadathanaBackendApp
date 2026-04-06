@@ -31,6 +31,7 @@ Follow these rules strictly for **every task, no exceptions**:
 - **Commit messages**: Use conventional commits (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`)
 - **Secrets**: Never modify `.env` or commit secrets — only edit `.env.example`
 - **Existing patterns**: New endpoints must follow the existing pagination, filter, and response patterns (see Key Implementation Patterns below)
+- **Plans**: Always save plan files (e.g., `plan_*.md`) in the project root directory
 
 ## Project Overview
 
