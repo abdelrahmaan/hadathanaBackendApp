@@ -27,6 +27,7 @@ services:
     volumes:
       - ./scripts:/app/scripts:ro
       - ./mongo_migration:/app/mongo_migration:ro
+      - ./normalization.py:/app/normalization.py:ro
       - ./hadith_topics.jsonl:/app/hadith_topics.jsonl:ro
       - ./hadith_embeddings.jsonl:/app/hadith_embeddings.jsonl:ro
     depends_on:
