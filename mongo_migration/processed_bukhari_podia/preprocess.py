@@ -49,7 +49,11 @@ Text cleaning applied:
 import json
 import pathlib
 import re
+import sys
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
+from normalization import normalize_for_search
 
 # ------------------------------------------------------------------
 # Regex helpers
@@ -208,6 +212,9 @@ def process_hadiths():
 
             flat_narrators = list(seen_rawi_ids.values())
 
+            hadith_text_plain = strip_tashkeel(hadith_text)
+            sanad_text_plain = strip_tashkeel(sanad_text)
+            matn_text_plain = strip_tashkeel(matn_text)
             out = {
                 "hadith_url": doc.get("hadith_url", ""),
                 "hadith_indices": hadith_indices,
@@ -215,11 +222,14 @@ def process_hadiths():
                 "book": doc.get("book_name", ""),
                 "chapter": doc.get("chapter", ""),
                 "hadith_text": hadith_text,
-                "hadith_text_plain": strip_tashkeel(hadith_text),
+                "hadith_text_plain": hadith_text_plain,
+                "hadith_text_search": normalize_for_search(hadith_text_plain),
                 "sanad_text": sanad_text,
-                "sanad_text_plain": strip_tashkeel(sanad_text),
+                "sanad_text_plain": sanad_text_plain,
+                "sanad_text_search": normalize_for_search(sanad_text_plain),
                 "matn_text": matn_text,
-                "matn_text_plain": strip_tashkeel(matn_text),
+                "matn_text_plain": matn_text_plain,
+                "matn_text_search": normalize_for_search(matn_text_plain),
                 "tawabi_text": tawabi_text,
                 "chains": chains,
                 "narrators": flat_narrators,
@@ -341,13 +351,17 @@ def process_narrators():
             rank = doc.get("rank", "")
 
             name_clean = clean_name_in_chain(doc.get("name_in_chain", ""))
+            name_in_chain_plain = strip_tashkeel(name_clean)
+            full_name_plain = strip_tashkeel(full_name)
             out = {
                 "rawi_id": rawi_id,
                 "name_in_chain": doc.get("name_in_chain", ""),
                 "name_in_chain_clean": name_clean,
-                "name_in_chain_plain": strip_tashkeel(name_clean),
+                "name_in_chain_plain": name_in_chain_plain,
+                "name_in_chain_search": normalize_for_search(name_in_chain_plain),
                 "full_name": full_name,
-                "full_name_plain": strip_tashkeel(full_name),
+                "full_name_plain": full_name_plain,
+                "full_name_search": normalize_for_search(full_name_plain),
                 "rank": rank,
                 "rank_plain": strip_tashkeel(rank),
                 "full_tooltip_info": doc.get("full_tooltip_info", ""),

@@ -25,6 +25,9 @@ import sys
 import time
 from typing import Optional
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
+from normalization import normalize_for_search
+
 # ------------------------------------------------------------------
 # Regex helpers
 # ------------------------------------------------------------------
@@ -118,11 +121,13 @@ def process_narrator(raw: dict) -> dict:
     Adds  : name_plain
     """
     name = raw.get("name") or ""
+    name_plain = strip_tashkeel(name)
     doc = {
         "status": raw.get("status"),
         "narrator_id": raw.get("narrator_id"),
         "name": name,
-        "name_plain": strip_tashkeel(name),
+        "name_plain": name_plain,
+        "name_search": normalize_for_search(name_plain),
     }
     for field in (
         "kunya", "nasab", "death_date", "birth_date",
@@ -132,6 +137,11 @@ def process_narrator(raw: dict) -> dict:
         value = raw.get(field)
         if value is not None:
             doc[field] = value
+    # Add search fields for kunya and nasab if present
+    if "kunya" in doc:
+        doc["kunya_search"] = normalize_for_search(strip_tashkeel(doc["kunya"] or ""))
+    if "nasab" in doc:
+        doc["nasab_search"] = normalize_for_search(strip_tashkeel(doc["nasab"] or ""))
     return doc
 
 

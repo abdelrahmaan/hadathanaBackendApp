@@ -39,8 +39,12 @@ Usage:
 import json
 import pathlib
 import re
+import sys
 import time
 from typing import Optional
+
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
+from normalization import normalize_for_search
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -139,11 +143,13 @@ def process_bukhari_hadith(raw: dict, hadith_tashkeel: str) -> dict:
                 seen_names.add(n["name"])
                 unique_narrators.append({"name": n["name"], "narrator_id": n["narrator_id"]})
 
+    hadith_plain = strip_tashkeel(hadith_tashkeel)
     return {
         "hadith_index": raw.get("hadith_index"),
         "source": "bukhari",
         "hadith": hadith_tashkeel,
-        "hadith_plain": strip_tashkeel(hadith_tashkeel),
+        "hadith_plain": hadith_plain,
+        "hadith_search": normalize_for_search(hadith_plain),
         "matn_plain": [strip_tashkeel(s) for s in matn_segments if s],
         "n_matn": len(matn_segments),
         "n_chains": len(chains),

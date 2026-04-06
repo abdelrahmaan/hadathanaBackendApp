@@ -48,12 +48,18 @@ INDEXES = {
         ([("chains.type", ASCENDING)], {}),
         # Hadith index lookup (GET /hadiths/{id})
         ([("hadith_index", ASCENDING)], {"unique": True}),
+        # Normalized search field
+        ([("hadith_search", ASCENDING)], {}),
     ],
     "raw_shamela_narrators": [
         # Narrator ID lookup (GET /narrators/{narrator_id})
         ([("narrator_id", ASCENDING)], {"unique": True}),
         # Name search (GET /narrators?name_plain=...)
         ([("name_plain", ASCENDING)], {}),
+        # Normalized search fields
+        ([("name_search", ASCENDING)], {}),
+        ([("kunya_search", ASCENDING)], {}),
+        ([("nasab_search", ASCENDING)], {}),
         # Kunya / nasab filters
         ([("kunya", ASCENDING)], {}),
         ([("nasab", ASCENDING)], {}),
@@ -75,6 +81,10 @@ INDEXES = {
         ([("book", ASCENDING)], {}),
         # Topic filter (GET /api/v2/hadiths?topic=...)
         ([("topics", ASCENDING)], {}),
+        # Normalized search fields
+        ([("hadith_text_search", ASCENDING)], {}),
+        ([("sanad_text_search", ASCENDING)], {}),
+        ([("matn_text_search", ASCENDING)], {}),
     ],
     "raw_podia_books": [
         # URL-based unique lookup (upsert key)
@@ -92,6 +102,9 @@ INDEXES = {
         # Name search
         ([("full_name_plain", ASCENDING)], {}),
         ([("name_in_chain_plain", ASCENDING)], {}),
+        # Normalized search fields
+        ([("full_name_search", ASCENDING)], {}),
+        ([("name_in_chain_search", ASCENDING)], {}),
     ],
     "analytics_narrator_stats_podia": [
         ([("rawi_id", ASCENDING)], {"unique": True}),
