@@ -11,8 +11,11 @@ class Narrator(BaseModel):
     narrator_id: int | str
     name: str
     name_plain: str | None = None
+    name_search: str | None = None
     kunya: str | None = None
+    kunya_search: str | None = None
     nasab: str | None = None
+    nasab_search: str | None = None
     death_date: str | None = None
     tabaqa: str | None = None
     rank_ibn_hajar: str | None = None

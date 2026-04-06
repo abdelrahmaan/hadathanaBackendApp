@@ -25,6 +25,7 @@ class Hadith(BaseModel):
     source: str
     hadith: str
     hadith_plain: str
+    hadith_search: str | None = None
     matn_plain: list[str]
     n_matn: int
     n_chains: int

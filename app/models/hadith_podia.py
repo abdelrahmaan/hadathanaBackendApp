@@ -34,10 +34,13 @@ class PodiaHadith(BaseModel):
     chapter: str
     hadith_text: str
     hadith_text_plain: str
+    hadith_text_search: str | None = None
     sanad_text: str
     sanad_text_plain: str
+    sanad_text_search: str | None = None
     matn_text: str
     matn_text_plain: str
+    matn_text_search: str | None = None
     tawabi_text: str | None = None
     topics: list[str] = []
     chains: list[PodiaChain]

@@ -7,8 +7,10 @@ class PodiaNarrator(BaseModel):
     name_in_chain: str
     name_in_chain_clean: str
     name_in_chain_plain: str
+    name_in_chain_search: str | None = None
     full_name: str
     full_name_plain: str
+    full_name_search: str | None = None
     rank: str
     rank_plain: str
     full_tooltip_info: str
