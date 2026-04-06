@@ -1,10 +1,12 @@
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import ValidationError
 
 from ..database import get_client, get_db, get_hadiths_collection
 from ..models.hadith import Hadith, PaginatedHadiths
+from ..normalization import normalize_for_search
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ async def list_hadiths(
 ):
     query_filter: dict = {}
     if hadith_plain:
-        query_filter["hadith_plain"] = {"$regex": hadith_plain, "$options": "i"}
+        query_filter["hadith_search"] = {"$regex": re.escape(normalize_for_search(hadith_plain)), "$options": "i"}
     if narrator_id is not None:
         query_filter["unique_narrators.narrator_id"] = {"$in": [narrator_id, str(narrator_id)]}
     if chain_type:

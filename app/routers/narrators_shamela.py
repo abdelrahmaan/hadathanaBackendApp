@@ -1,10 +1,12 @@
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import ValidationError
 
 from ..database import get_client, get_db, get_narrators_collection, get_narrator_stats_collection
 from ..models.narrator import Narrator, NarratorStats, PaginatedNarrators
+from ..normalization import normalize_for_search
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +28,11 @@ async def list_narrators(
 ):
     query_filter: dict = {}
     if name_plain:
-        query_filter["name_plain"] = {"$regex": name_plain, "$options": "i"}
+        query_filter["name_search"] = {"$regex": re.escape(normalize_for_search(name_plain)), "$options": "i"}
     if kunya:
-        query_filter["kunya"] = {"$regex": kunya, "$options": "i"}
+        query_filter["kunya_search"] = {"$regex": re.escape(normalize_for_search(kunya)), "$options": "i"}
     if nasab:
-        query_filter["nasab"] = {"$regex": nasab, "$options": "i"}
+        query_filter["nasab_search"] = {"$regex": re.escape(normalize_for_search(nasab)), "$options": "i"}
 
     db = get_db(get_client())
     collection = get_narrators_collection(db)

@@ -1,10 +1,12 @@
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import ValidationError
 
 from ..database import get_client, get_db, get_podia_narrators_collection, get_podia_narrator_stats_collection, get_podia_narrators_tarajem_collection
 from ..models.narrator_podia import PodiaNarrator, PodiaNarratorStats, PodiaNarratorTarajem, PaginatedPodiaNarrators
+from ..normalization import normalize_for_search
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +27,9 @@ async def list_narrators(
 ):
     query_filter: dict = {}
     if full_name_plain:
-        query_filter["full_name_plain"] = {"$regex": full_name_plain, "$options": "i"}
+        query_filter["full_name_search"] = {"$regex": re.escape(normalize_for_search(full_name_plain)), "$options": "i"}
     if rank:
-        query_filter["rank"] = {"$regex": rank, "$options": "i"}
+        query_filter["rank"] = {"$regex": re.escape(rank), "$options": "i"}
 
     db = get_db(get_client())
     collection = get_podia_narrators_collection(db)
