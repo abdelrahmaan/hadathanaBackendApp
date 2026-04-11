@@ -49,6 +49,7 @@ SOURCES = [
 # Using mongoimport --mode=upsert on these would REPLACE entire documents — don't do that.
 ENRICHMENTS = [
     (REPO_ROOT / "hadith_topics.jsonl", "processed_podia_books", "hadith_url", "topics"),
+    (REPO_ROOT / "hadith_titles.jsonl", "processed_podia_books", "hadith_url", "title"),
     (REPO_ROOT / "hadith_embeddings.jsonl", "processed_podia_books", "hadith_url", "matn_embedding"),
 ]
 

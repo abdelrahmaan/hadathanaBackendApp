@@ -19,6 +19,8 @@ EXPECTED_COLLECTIONS = {
     "raw_shamela_narrators": 1500,
     "analytics_narrator_stats_podia": 100,
     "analytics_narrator_stats_shamela": 100,
+    "chat_sessions_dev": 0,   # optional — empty at startup
+    "chat_sessions_prod": 0,  # optional — empty at startup
 }
 
 
@@ -64,6 +66,12 @@ def get_podia_raw_hadiths_collection(db):
 
 def get_podia_narrators_tarajem_collection(db):
     return db["processed_podia_narrator_biographies"]
+
+
+def get_chat_sessions_collection(db):
+    """Returns the env-appropriate chat sessions collection (dev or prod)."""
+    name = "chat_sessions_dev" if settings.is_dev else "chat_sessions_prod"
+    return db[name]
 
 
 async def connect():

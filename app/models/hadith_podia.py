@@ -43,6 +43,7 @@ class PodiaHadith(BaseModel):
     matn_text_search: str | None = None
     tawabi_text: str | None = None
     topics: list[str] = []
+    title: str = ""
     chains: list[PodiaChain]
     narrators: list[PodiaHadithNarrator]
 

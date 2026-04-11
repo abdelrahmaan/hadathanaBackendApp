@@ -38,5 +38,12 @@ pytest>=7.0
 pytest-asyncio>=0.23
 httpx>=0.27.0
 
+# Chatbot (app/chatbot/)
+langchain>=0.3.15
+langchain-qdrant>=0.2.0
+langchain-community>=0.3.0
+qdrant-client>=1.12.0
+fastembed>=0.4.0
+
 # Optional: For LLM-based extraction (app.py)
 # langextract>=0.1.0

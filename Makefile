@@ -41,6 +41,37 @@ prod-ps:
 prod-restart:
 	$(PROD_COMPOSE) restart api
 
+# ── Tests ─────────────────────────────────────────────────────
+#
+# Unit tests (mocked — no server needed):
+#   make test-chatbot
+#
+# Integration / smoke tests (require a live stack):
+#   make test-chatbot-dev    → APP_ENV=dev  hits localhost:8001
+#   make test-chatbot-prod   → APP_ENV=prod hits localhost:8000
+
+PYTHON = /home/abdo_kamar/Projects/.venv/bin/python
+
+.PHONY: test test-chatbot test-chatbot-dev test-chatbot-prod test-db-dev test-db-prod
+
+test:
+	$(PYTHON) -m pytest tests/ -v
+
+test-chatbot:
+	$(PYTHON) -m pytest tests/test_chatbot_v1.py -v
+
+test-chatbot-dev:
+	APP_ENV=dev $(PYTHON) -m pytest tests/test_chatbot_smoke.py -v
+
+test-chatbot-prod:
+	APP_ENV=prod $(PYTHON) -m pytest tests/test_chatbot_smoke.py -v
+
+test-db-dev:
+	APP_ENV=dev $(PYTHON) -m pytest tests/test_data_presence.py -v
+
+test-db-prod:
+	APP_ENV=prod $(PYTHON) -m pytest tests/test_data_presence.py -v
+
 # ── Utilities ─────────────────────────────────────────────────
 
 .PHONY: status health

@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     cors_origins_dev: str = "http://localhost:3000,http://localhost:5173"
 
+    # Chatbot
+    chatbot_enabled: bool = False
+    cohere_api_key: str = ""
+    openrouter_api_key: str = ""
+    qdrant_url: str = "http://qdrant:6333"
+    chatbot_model: str = "google/gemini-3-flash-preview"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @property

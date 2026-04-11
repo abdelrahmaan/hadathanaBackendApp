@@ -47,7 +47,8 @@ Hadathna is a dual-backend Islamic hadith knowledge system combining MongoDB (RE
 - Uses Motor (async MongoDB driver) with connection lifecycle in `app/database.py`
 - Database connection is established in `lifespan` context manager (connects on startup, disconnects on shutdown)
 - CORS configured via `settings.get_cors_origins()` (comma-separated in `.env`)
-- Router structure: each data source has separate routers (`hadiths_shamela`, `narrators_shamela`, `hadiths_podia`, `narrators_podia`)
+- Router structure: each data source has separate routers (`hadiths_shamela`, `narrators_shamela`, `hadiths_podia`, `narrators_podia`); chatbot lives in `app/chatbot/router.py`
+- CORS allows `GET` and `POST` (POST required for chatbot)
 
 **Database access pattern**:
 ```python
@@ -74,6 +75,10 @@ Podia pipeline (raw):
 Analytics:
 - `analytics_narrator_stats_shamela` - Shamela teacher/student statistics (`freq` = distinct hadiths where the pair co-appears, not raw chain occurrences)
 - `analytics_narrator_stats_podia` - Podia teacher/student statistics (`freq` = distinct hadiths where the pair co-appears, not raw chain occurrences)
+
+Chatbot:
+- `chat_sessions_dev` — conversation history in dev (`APP_ENV=dev`)
+- `chat_sessions_prod` — conversation history in prod (`APP_ENV=prod`)
 
 Future (not yet populated):
 - `canonical_books`, `canonical_hadiths`, `canonical_narrators`, `canonical_chains` (v1.2+)
@@ -357,10 +362,12 @@ Two scripts enrich hadiths without any MongoDB dependency. They read the source 
 
 | Script | Input | Output | Destination |
 |---|---|---|---|
-| `scripts/tag_topics_jsonl.py` | `bukhari_podia_hadiths.jsonl` | `hadith_topics.jsonl` | MongoDB (`mongoimport --mode=upsert`) |
+| `scripts/tag_topics_jsonl.py` | `bukhari_podia_hadiths.jsonl` | `hadith_topics.jsonl` | MongoDB (PyMongo `$set` bulk_write — see below) |
 | `scripts/embed_matn_jsonl.py` | `bukhari_podia_hadiths.jsonl` | `hadith_embeddings.jsonl` | Qdrant / vector DB (deferred) |
 
 Both are **resumable** — re-running skips already-processed `hadith_url`s. Source JSONL is never modified.
+
+> ⚠️ **Never use `mongoimport --mode=upsert` or `--mode=merge` for partial field updates** — both replace the entire document with only the fields in the JSONL, destroying all other fields. Always use PyMongo `bulk_write` with `$set` to add/update a single field.
 
 ```bash
 # Run in tmux enrichment session (topics → embeddings, chained)
@@ -369,10 +376,17 @@ tmux send-keys -t enrichment 'cd ~/Projects/hadathanaBackendApp && \
   /home/abdo_kamar/Projects/.venv/bin/python scripts/tag_topics_jsonl.py && \
   /home/abdo_kamar/Projects/.venv/bin/python scripts/embed_matn_jsonl.py' Enter
 
-# After topics finish — import into HadithDataDev
-docker exec -i mongodb-hadathana mongoimport --db HadithDataDev \
-  --collection processed_podia_books --mode=upsert --upsertFields=hadith_url \
-  < hadith_topics.jsonl
+# After topics finish — apply to HadithDataDev using $set (safe merge, never replaces)
+/home/abdo_kamar/Projects/.venv/bin/python - <<'EOF'
+import json
+from pymongo import MongoClient, UpdateOne
+
+client = MongoClient("mongodb://localhost:27017/")
+col = client["HadithDataDev"]["processed_podia_books"]
+ops = [UpdateOne({"hadith_url": json.loads(l)["hadith_url"]}, {"$set": {"topics": json.loads(l)["topics"]}}) for l in open("hadith_topics.jsonl")]
+result = col.bulk_write(ops, ordered=False)
+print(f"matched: {result.matched_count}, modified: {result.modified_count}")
+EOF
 ```
 
 Requires `OPENROUTER_API_KEY` (topics) and `COHERE_API_KEY` (embeddings) in `.env`.
@@ -410,6 +424,45 @@ if hadith_plain:
 
 **Important**: Podia advanced extraction data (`bukhari_pedia_advanced_extraction_results.json`) feeds BOTH MongoDB (via `preprocess.py`) and Neo4j (via `build_graph.py`). The two databases serve different query patterns with overlapping but distinct data.
 
+**Qdrant** (via `app/chatbot/qdrant.py`):
+- Collection: `hadiths_matn` — 7,075 points, 1536-dim dense (Cohere embed-multilingual-v3.0) + BM25 sparse (FastEmbedSparse)
+- Populated by `scripts/sync_qdrant.py` (run once by `qdrant-init` container on startup)
+- MongoDB stays the **source of truth** — Qdrant is a derived index
+- After any Mongo data update: re-run `python scripts/sync_qdrant.py --force`
+- Client lifecycle: `connect_qdrant()` / `disconnect_qdrant()` in `app/main.py` lifespan (mirrors `database.py`)
+
+### Chatbot Architecture (`app/chatbot/`)
+
+| File | Purpose |
+|---|---|
+| `config.py` | Compile-time constants: collection name, embedding dim, reranker model |
+| `qdrant.py` | QdrantClient lifecycle (module-level singleton, mirrors `database.py`) |
+| `indexer.py` | Populate Qdrant from Mongo — reuses stored `matn_embedding`, computes BM25 |
+| `retriever.py` | Build hybrid retriever: Qdrant HYBRID mode + Cohere reranker |
+| `agent.py` | LangChain `create_tool_calling_agent` + `@tool search_hadiths`, OpenRouter LLM |
+| `prompts.py` | Arabic system prompt (cite-or-refuse guardrail) + thread rename prompt |
+| `session.py` | `get_or_create_session()` / `append_turn()` — writes to `chat_sessions_dev` or `chat_sessions_prod` based on `APP_ENV` |
+| `router.py` | `POST /api/v2/chat` — SSE streaming, session_id management, citation extraction |
+| `models.py` | `ChatRequest`, `Citation`, `SessionMessage`, `ChatSession` |
+
+**SSE event sequence** for `POST /api/v2/chat`:
+```
+assistant_message_start  → carries session_id for new sessions
+content                  → one per token
+assistant_message_complete → full text + citations[]
+thread_rename            → short Arabic title
+stream_end
+```
+
+**Data update workflow** (add this step when Mongo data changes):
+After updating `processed_podia_books`, re-sync Qdrant:
+```bash
+python scripts/sync_qdrant.py --force
+# or inside Docker:
+docker exec hadathana-qdrant-init-dev python scripts/sync_qdrant.py \
+  --uri mongodb://mongo:27017/ --db HadithDataDev --qdrant-url http://qdrant:6333 --force
+```
+
 ## Environment Variables
 
 Required in `.env`:
@@ -437,6 +490,12 @@ CORS_ORIGINS_DEV=http://localhost:3000,http://localhost:5173
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
+
+# ── Chatbot ───────────────────────────────────────────────────
+COHERE_API_KEY=<your_cohere_api_key>
+OPENROUTER_API_KEY=<your_openrouter_api_key>
+QDRANT_URL=http://qdrant:6333          # docker service name; use http://localhost:6333 for local scripts
+CHATBOT_MODEL=qwen/qwen3-235b-a22b    # OpenRouter model slug
 
 # ── Cloudflare R2 (data snapshots) ───────────────────────────
 R2_ENDPOINT_URL=https://<account_id>.r2.cloudflarestorage.com
@@ -538,6 +597,414 @@ curl http://localhost:8000/api/v1/narrators/822/stats
 # Podia endpoints (v2)
 curl http://localhost:8000/api/v2/hadiths
 curl http://localhost:8000/api/v2/narrators
+```
+
+## AI / RAG / Chatbot Stack
+
+All AI features (RAG, chatbot, agents) live in `app/chatbot/`. Use this stack exclusively — do not introduce alternatives.
+
+Reference docs: https://docs.langchain.com/oss/python/langchain/
+
+### Full Stack
+
+| Layer | Choice | Notes |
+|---|---|---|
+| **Agent orchestration** | LangChain `create_agent` | Single factory — never use `initialize_agent` or `AgentExecutor` (deprecated) |
+| **Tools** | `@tool` decorator | Type-annotated; docstring is the LLM-visible description — make it precise |
+| **MCP servers** | `MultiServerMCPClient` (`langchain-mcp-adapters`) | Expose external tools as MCP servers; agent consumes via `get_tools()` |
+| **Short-term memory** | `InMemorySaver` checkpointer (dev) | `thread_id` in config for per-session state; swap to Redis/Postgres in prod |
+| **Context engineering** | `middleware=[...]` on `create_agent` | `dynamic_prompt`, `SummarizationMiddleware` — start static, add dynamic only when needed |
+| **Guardrails** | `PIIMiddleware`, `HumanInTheLoopMiddleware` | Stack as middleware; deterministic (regex) checks first, model-based last |
+| **Structured output** | `response_format=PydanticModel` on `create_agent` | LangChain picks best strategy (native > tool calling > prompting) automatically |
+| **LLM** | `init_chat_model` via OpenRouter | Model swappable via `CHATBOT_MODEL` env var — never hardcode |
+| **Streaming** | `agent.astream(stream_mode="updates", version="v2")` | SSE via FastAPI `StreamingResponse` from day one |
+| **RAG / Retrieval** | `@tool` wrapping retriever | Use Agentic RAG (tool) not chain-based; agent decides when to retrieve |
+| **Vector store** | Qdrant (self-hosted Docker) | Hybrid dense+BM25 via `langchain-qdrant` |
+| **Embeddings** | Cohere `embed-multilingual-v3.0` | Same model as stored vectors in Mongo — never re-embed without syncing both |
+| **Reranker** | Cohere `rerank-multilingual-v3.0` | Arabic-aware; top_n=5 from top-20 prefetch |
+| **API endpoints** | FastAPI `StreamingResponse` | All chat endpoints SSE, prefix `/api/v2/chat` |
+
+### Key imports
+
+```python
+# Agent + tools
+from langchain.agents import create_agent
+from langchain.tools import tool
+from langchain.chat_models import init_chat_model
+
+# Messages
+from langchain.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage, RemoveMessage
+
+# Memory
+from langgraph.checkpoint.memory import InMemorySaver
+
+# Streaming
+from langgraph.config import get_stream_writer
+
+# MCP
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+# Qdrant hybrid retrieval
+from langchain_qdrant import QdrantVectorStore, RetrievalMode, FastEmbedSparse
+from langchain_cohere import CohereRerank
+from langchain.retrievers import ContextualCompressionRetriever
+
+# Structured output + guardrails
+from langchain.agents.middleware import PIIMiddleware, HumanInTheLoopMiddleware
+from langchain.agents import dynamic_prompt
+```
+
+---
+
+### Agent pattern
+
+```python
+# app/chatbot/agent.py
+from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
+from langgraph.checkpoint.memory import InMemorySaver
+
+model = init_chat_model(
+    settings.chatbot_model,              # e.g. "openrouter/qwen/qwen3-235b-a22b"
+    base_url="https://openrouter.ai/api/v1",
+    api_key=settings.openrouter_api_key,
+)
+
+agent = create_agent(
+    model,
+    tools=[search_hadiths, search_narrators],
+    system_prompt="أجب فقط من السياق المتاح...",  # always from prompts.py
+    checkpointer=InMemorySaver(),        # omit for stateless V1
+    middleware=[PIIMiddleware("email", strategy="redact")],  # add guardrails here
+    max_iterations=4,                    # always cap for multi-tool agents
+)
+```
+
+### Tools pattern
+
+```python
+from langchain.tools import tool, ToolRuntime
+from pydantic import BaseModel, Field
+
+# Basic tool — type hints + docstring required
+@tool
+def search_hadiths(query: str, limit: int = 5) -> str:
+    """Search Bukhari hadiths by meaning or topic. Use for any question about hadith content."""
+    docs = retriever.invoke(query)
+    return "\n\n".join(
+        f"[{i+1}] {d.page_content}\nSource: {d.metadata.get('hadith_url')}"
+        for i, d in enumerate(docs[:limit])
+    )
+
+# Tool returning content + raw artifact (for citation display)
+@tool(response_format="content_and_artifact")
+def search_hadiths_with_docs(query: str):
+    """Search Bukhari hadiths. Returns text for LLM + raw docs for frontend citations."""
+    docs = retriever.invoke(query)
+    text = "\n\n".join(f"[{i+1}] {d.page_content}" for i, d in enumerate(docs))
+    return text, docs
+
+# Complex schema via Pydantic
+class HadithSearchInput(BaseModel):
+    query: str = Field(description="Search terms in Arabic or English")
+    topic: str | None = Field(default=None, description="Optional topic filter")
+    limit: int = Field(default=5, description="Max results, 1–20")
+
+@tool(args_schema=HadithSearchInput)
+def search_hadiths_filtered(query: str, topic: str | None = None, limit: int = 5) -> str:
+    """Search Bukhari hadiths with optional topic filter."""
+    ...
+
+# Tool accessing runtime state (e.g. thread_id, stream writer)
+@tool
+def log_search(query: str, runtime: ToolRuntime) -> str:
+    """Log the search query and return thread info."""
+    runtime.stream_writer(f"Searching for: {query}")
+    return f"Thread: {runtime.execution_info.thread_id}"
+```
+
+Rules:
+- **`snake_case` names only** — some providers reject spaces or special characters in tool names
+- **Docstring is the LLM-visible description** — start with a precise verb: "Search", "Fetch", "List", "Get"
+- **`runtime` parameter is auto-injected and hidden from LLM** — use it for stream_writer, state, context
+- **Reserved param names**: never name args `config` or `runtime` — both are reserved
+- **Keep tools narrow** — one responsibility. Broad tools make the LLM guess wrong
+- **`ToolNode`** handles parallel execution and error handling when used inside LangGraph
+
+```python
+# ToolNode for LangGraph-based flows (not needed for create_agent)
+from langgraph.prebuilt import ToolNode
+tool_node = ToolNode(
+    [search_hadiths, search_narrators],
+    handle_tool_errors=True,   # catch exceptions, return error message to LLM
+)
+```
+
+### MCP pattern
+
+```python
+# Connect an external MCP server (e.g. a Hadith search microservice)
+client = MultiServerMCPClient({
+    "hadith_search": {
+        "transport": "stdio",
+        "command": "python",
+        "args": ["scripts/mcp_hadith_server.py"],
+    }
+})
+tools = await client.get_tools()
+agent = create_agent(model, tools)
+```
+
+Use MCP when a tool is a standalone service that should be reusable outside the agent (e.g. a search microservice). For internal retrieval logic, plain `@tool` is simpler.
+
+### Middleware pattern
+
+Middleware is passed as a list to `create_agent`. It intercepts agent execution at each step for observability, transformation, resilience, and control.
+
+```python
+from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    SummarizationMiddleware,
+    PIIMiddleware,
+    HumanInTheLoopMiddleware,
+    ModelFallbackMiddleware,
+    ToolCallLimitMiddleware,
+)
+
+agent = create_agent(
+    model,
+    tools=[search_hadiths, search_narrators],
+    middleware=[
+        # 1. Safety: redact PII from all user input
+        PIIMiddleware("email", strategy="redact", apply_to_input=True),
+        # 2. Cost control: cap tool calls per run
+        ToolCallLimitMiddleware(max_tool_calls=10, on_limit="end"),
+        # 3. Resilience: fallback model if primary fails
+        ModelFallbackMiddleware(fallback_models=["openrouter/google/gemini-flash-1.5"]),
+        # 4. Context: compress history when approaching token limit
+        SummarizationMiddleware(
+            model="openrouter/qwen/qwen3-235b-a22b",
+            trigger=("tokens", 4000),
+            keep=("messages", 20),
+        ),
+    ],
+    checkpointer=InMemorySaver(),  # required for HumanInTheLoopMiddleware
+)
+```
+
+**Execution order for `middleware=[m1, m2, m3]`:**
+- `before_*` hooks: m1 → m2 → m3
+- `wrap_*` hooks: nested (m1 wraps m2 wraps m3)
+- `after_*` hooks: m3 → m2 → m1 (reversed)
+
+**Built-in middleware reference:**
+
+| Middleware | Purpose | Key params |
+|---|---|---|
+| `SummarizationMiddleware` | Auto-compress history at token threshold | `trigger`, `keep`, `model` |
+| `PIIMiddleware` | Redact/mask/hash/block PII | `"email"/"credit_card"/"ip_address"`, `strategy` |
+| `HumanInTheLoopMiddleware` | Pause for human approval before tool | `interrupt_on={tool_name: True}` — requires checkpointer |
+| `ModelFallbackMiddleware` | Chain fallback models on failure | `fallback_models=[...]` |
+| `ModelCallLimitMiddleware` | Limit LLM calls per thread/run | `max_calls`, `on_limit` |
+| `ToolCallLimitMiddleware` | Limit tool calls globally or per-tool | `max_tool_calls`, `on_limit` |
+| `LLMToolSelectorMiddleware` | Filter relevant tools from large sets | Reduces context before main call |
+
+**Custom middleware (decorator style — simple):**
+
+```python
+from langchain.agents.middleware import before_model, after_model, AgentState
+from langgraph.runtime import Runtime
+
+@before_model
+def log_request(state: AgentState, runtime: Runtime) -> dict | None:
+    print(f"[chatbot] {len(state['messages'])} messages in context")
+    return None   # return None to pass through unchanged
+
+@after_model
+def log_response(state: AgentState, runtime: Runtime) -> dict | None:
+    print(f"[chatbot] response: {state['messages'][-1].content[:100]}")
+    return None
+```
+
+**Custom middleware (class style — for multiple hooks or async):**
+
+```python
+from langchain.agents.middleware import AgentMiddleware, AgentState
+from langgraph.runtime import Runtime
+
+class ArabicInputValidator(AgentMiddleware):
+    def before_model(self, state: AgentState, runtime: Runtime) -> dict | None:
+        # validate or transform input before LLM sees it
+        return None
+
+    async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict | None:
+        return None
+```
+
+**Jump to exit early** (e.g. input rejected by guardrail):
+```python
+@before_model
+def block_off_topic(state: AgentState, runtime: Runtime) -> dict | None:
+    last = state["messages"][-1].content
+    if "كرة القدم" in last:
+        return {"jump_to": "end"}   # valid targets: "end", "tools", "model"
+    return None
+```
+
+**For this project — middleware stack per version:**
+- V1 (stateless): `[PIIMiddleware, ToolCallLimitMiddleware(max=3)]`
+- V2 (stateful): add `SummarizationMiddleware` once sessions exceed 10 turns
+- V3 (graph tools): add `HumanInTheLoopMiddleware` if any write tool is introduced
+
+### Context engineering pattern
+
+Context engineering = controlling what the model sees at each turn. Use middleware hooks, not ad-hoc prompt concatenation.
+
+```python
+from langchain.agents import create_agent, dynamic_prompt
+
+@dynamic_prompt
+def adaptive_hadith_prompt(request):
+    """Shorten system prompt for long conversations to preserve token budget."""
+    if len(request.messages) > 12:
+        return "أنت مساعد حديثي. كن موجزاً وأجب فقط من السياق."
+    return FULL_SYSTEM_PROMPT   # from prompts.py
+
+agent = create_agent(model, tools=[...], middleware=[adaptive_hadith_prompt])
+```
+
+Rules:
+- **Start with a static prompt in `prompts.py`** — add `dynamic_prompt` only when token overflow is a measured problem, not a hypothesis
+- **Token budget first**: wrong answers → check what context the LLM actually received before blaming the model
+- **Max 8–10 tools per agent** — beyond that, split into specialized sub-agents or use `LLMToolSelectorMiddleware`
+
+### Structured output pattern
+
+```python
+from pydantic import BaseModel, Field
+
+class HadithAnswer(BaseModel):
+    answer: str = Field(description="The answer in Arabic")
+    citations: list[str] = Field(description="List of hadith URLs cited")
+    confidence: str = Field(description="high / medium / low")
+
+agent = create_agent(
+    model,
+    tools=[search_hadiths],
+    response_format=HadithAnswer,   # LangChain picks best extraction strategy
+)
+result = agent.invoke({"messages": [...]})
+# result is a validated HadithAnswer instance
+```
+
+Use structured output on the final response when the frontend needs machine-readable fields (citations list, confidence). Don't use it as a crutch to parse free-form LLM text — design the prompt so the model reasons naturally, then extract structure at the boundary.
+
+### Retrieval (RAG) pattern
+
+```python
+# app/chatbot/retriever.py — hybrid Qdrant + Cohere rerank
+def build_retriever(client, cohere_embeddings, collection: str, k_fetch=20, k_final=5):
+    store = QdrantVectorStore(
+        client=client,
+        collection_name=collection,
+        embedding=cohere_embeddings,
+        sparse_embedding=FastEmbedSparse(model_name="Qdrant/bm25"),
+        retrieval_mode=RetrievalMode.HYBRID,
+        vector_name="dense",
+        sparse_vector_name="sparse",
+    )
+    reranker = CohereRerank(model="rerank-multilingual-v3.0", top_n=k_final)
+    return ContextualCompressionRetriever(
+        base_compressor=reranker,
+        base_retriever=store.as_retriever(search_kwargs={"k": k_fetch}),
+    )
+```
+
+RAG architecture choice for this project:
+- **Agentic RAG** (retriever wrapped as `@tool`) — agent decides when to search. This is V1+.
+- Never use chain-based RAG (`RetrievalQA`, `ConversationalRetrievalChain`) — those are legacy patterns.
+- Two collections, two retrievers (`hadiths_matn`, `narrators_bio`) — don't mix; scores aren't comparable across corpus types.
+
+### SSE streaming pattern (FastAPI)
+
+```python
+# app/chatbot/router.py
+from fastapi.responses import StreamingResponse
+import json
+
+@router.post("")
+async def chat(req: ChatRequest):
+    async def stream():
+        async for chunk in agent.astream(
+            {"messages": [{"role": "user", "content": req.question}]},
+            stream_mode="updates",
+            version="v2",
+            config={"configurable": {"thread_id": req.session_id}},
+        ):
+            if token := chunk.get("token"):
+                yield f"data: {json.dumps({'token': token})}\n\n"
+        yield "data: [DONE]\n\n"
+    return StreamingResponse(stream(), media_type="text/event-stream")
+```
+
+### Short-term memory pattern
+
+```python
+# Stateful: pass checkpointer + thread_id per request
+agent = create_agent(model, tools=[...], checkpointer=InMemorySaver())
+result = agent.invoke(
+    {"messages": [HumanMessage("Hello")]},
+    config={"configurable": {"thread_id": "session-abc"}},
+)
+
+# Trim stale messages to stay within context window
+from langchain.messages import RemoveMessage
+agent.update_state(config, {"messages": [RemoveMessage(id=old_msg.id)]})
+```
+
+**Dev vs prod**: `InMemorySaver` is fine for dev and single-process deployments. For multi-replica prod, swap to `langgraph-checkpoint-redis` — the interface is identical, only the import changes.
+
+---
+
+### Hard rules for all AI code
+
+| Rule | Why |
+|---|---|
+| Always use `create_agent` | `AgentExecutor` / `initialize_agent` are deprecated and removed in 0.4+ |
+| `@tool` docstring is mandatory | It is the tool description the LLM sees — vague docstrings cause wrong tool selection |
+| LLM never writes Cypher or raw MongoDB | All DB access through typed Python helpers only |
+| `CHATBOT_MODEL` always from env | Never hardcode model slug in agent code |
+| `max_iterations=4` on all multi-tool agents | Prevents runaway tool loops |
+| Start with static prompt, add `dynamic_prompt` only when measured | Premature context engineering adds complexity with no benefit |
+| Qdrant sync after every Mongo data update | Run `scripts/sync_qdrant.py`, verify point count matches Mongo doc count |
+| Pin package versions | `langchain>=0.3.15`, `langchain-qdrant>=0.2.0`, `langchain-cohere>=0.4.0` |
+
+### New env vars (chatbot)
+
+```bash
+QDRANT_URL=http://qdrant:6333        # docker service name; http://localhost:6333 locally
+QDRANT_API_KEY=                      # empty for self-hosted, set for Qdrant Cloud
+CHATBOT_MODEL=qwen/qwen3-235b-a22b   # OpenRouter model slug — swappable without code change
+# OPENROUTER_API_KEY and COHERE_API_KEY already defined above
+```
+
+### Chatbot directory layout
+
+```
+app/chatbot/
+  __init__.py
+  config.py       # chatbot-specific settings (extends app/config.py)
+  qdrant.py       # QdrantClient lifecycle (mirrors app/database.py)
+  retriever.py    # build_retriever() — hybrid + rerank, one per collection
+  agent.py        # create_agent() + all @tool definitions
+  prompts.py      # Arabic system prompts — single source of truth, never inline
+  router.py       # POST /api/v2/chat (SSE streaming)
+  models.py       # ChatRequest, ChatResponse, HadithHit, NarratorHit, HadithAnswer
+  graph.py        # (V3) async Neo4j helpers — parametrized Cypher only, LLM never writes Cypher
+
+scripts/
+  sync_qdrant.py       # CLI: populate/resync Qdrant from Mongo (idempotent)
+  embed_narrators.py   # (V2) Cohere embeddings for narrator bios
 ```
 
 ## Deployment Notes
