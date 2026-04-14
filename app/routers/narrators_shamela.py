@@ -4,7 +4,12 @@ import re
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import ValidationError
 
-from ..database import get_client, get_db, get_narrators_collection, get_narrator_stats_collection
+from ..database import (
+    get_client,
+    get_db,
+    get_narrator_stats_collection,
+    get_narrators_collection,
+)
 from ..models.narrator import Narrator, NarratorStats, PaginatedNarrators
 from ..normalization import normalize_for_search
 

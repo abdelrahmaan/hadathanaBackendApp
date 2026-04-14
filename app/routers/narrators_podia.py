@@ -4,8 +4,19 @@ import re
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import ValidationError
 
-from ..database import get_client, get_db, get_podia_narrators_collection, get_podia_narrator_stats_collection, get_podia_narrators_tarajem_collection
-from ..models.narrator_podia import PodiaNarrator, PodiaNarratorStats, PodiaNarratorTarajem, PaginatedPodiaNarrators
+from ..database import (
+    get_client,
+    get_db,
+    get_podia_narrator_stats_collection,
+    get_podia_narrators_collection,
+    get_podia_narrators_tarajem_collection,
+)
+from ..models.narrator_podia import (
+    PaginatedPodiaNarrators,
+    PodiaNarrator,
+    PodiaNarratorStats,
+    PodiaNarratorTarajem,
+)
 from ..normalization import normalize_for_search
 
 logger = logging.getLogger(__name__)

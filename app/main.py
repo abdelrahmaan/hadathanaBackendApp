@@ -5,14 +5,25 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from .config import settings
-from .database import connect, disconnect, validate_connection, get_client, get_db_status
+from .database import (
+    connect,
+    disconnect,
+    get_client,
+    get_db_status,
+    validate_connection,
+)
 from .logging_config import setup_logging
 from .middleware import RequestLoggingMiddleware
-from .routers import hadiths_shamela, narrators_shamela, hadiths_podia, narrators_podia, search_podia
+from .routers import (
+    hadiths_podia,
+    hadiths_shamela,
+    narrators_podia,
+    narrators_shamela,
+    search_podia,
+)
 
 setup_logging()
 

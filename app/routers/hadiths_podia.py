@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import ValidationError
 
 from ..database import get_client, get_db, get_podia_hadiths_collection
-from ..models.hadith_podia import PodiaHadith, PaginatedPodiaHadiths
+from ..models.hadith_podia import PaginatedPodiaHadiths, PodiaHadith
 from ..normalization import normalize_for_search
 
 logger = logging.getLogger(__name__)

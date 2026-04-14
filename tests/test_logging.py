@@ -1,6 +1,7 @@
 import logging
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 
 @pytest.mark.asyncio
@@ -55,8 +56,9 @@ async def test_search_log_empty_filters_when_no_params(client):
 @pytest.mark.asyncio
 async def test_exception_handler_returns_500_json(client):
     """Unhandled exceptions should return 500 JSON with detail key and log event=error."""
-    from app.main import app
     from fastapi import Request
+
+    from app.main import app
 
     @app.get("/test-error-unique")
     async def boom(request: Request):
