@@ -5,9 +5,7 @@ TDD — written before the ة→ه and ى→ي mappings are added.
 Run with: pytest tests/test_normalization.py -v
 """
 
-import pytest
 from normalization import normalize_for_search
-
 
 # ---------------------------------------------------------------------------
 # Existing behaviour (must not break)

@@ -1,0 +1,20 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+exclude = [
+    "mongo_migration/",
+    "extract_data_v2/",
+    "scripts/",
+    "Hadith_split/",
+    "tarajm/",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (real bugs: undefined names, unused imports)
+    "I",   # isort (import ordering)
+]
+ignore = [
+    "E501",  # line too long
+]
