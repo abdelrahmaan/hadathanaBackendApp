@@ -33,5 +33,10 @@ cohere>=5.11.0
 openai>=1.0.0
 tqdm>=4.66.0
 
+# Testing
+pytest>=7.0
+pytest-asyncio>=0.23
+httpx>=0.27.0
+
 # Optional: For LLM-based extraction (app.py)
 # langextract>=0.1.0
