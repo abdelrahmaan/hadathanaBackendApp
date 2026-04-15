@@ -51,6 +51,16 @@ make health       # health check both APIs
 
 On first run, `mongo-init` auto-bootstraps the database from JSONL files. Subsequent starts skip bootstrap if data already exists (<1s).
 
+### Services and Ports
+
+| Service | Dev port | Prod port | Notes |
+|---------|----------|-----------|-------|
+| FastAPI | `8001` | `8000` | Main API |
+| MongoDB | `27017` | internal | Exposed only in dev |
+| Prometheus | `9090` | `9091` | Metrics scraper (30-day retention) |
+| Grafana | `3002` | `3001` | Dashboards (login: admin / see `.env`) |
+| Qdrant | `6333` | — | Vector DB for semantic search (dev only) |
+
 ---
 
 ## Feature Development Workflow
@@ -92,6 +102,74 @@ Prod rebuild takes ~20-30 seconds. Users see no downtime during the build; the o
 git checkout <last-good-commit>
 make prod         # rebuilds from rolled-back code
 ```
+
+---
+
+## CI/CD
+
+GitHub Actions runs on every pull request targeting `main`. The pipeline has two sequential jobs:
+
+| Job | Tool | What it checks |
+|-----|------|---------------|
+| `lint` | `ruff` | Code style and import order across `app/` and `tests/` |
+| `test` | `pytest` | Full test suite (runs only if lint passes) |
+
+Workflow file: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+
+Tests run with a mocked MongoDB connection (`APP_ENV=dev`, `MONGODB_URI_LOCAL=mongodb://localhost:27017/`). To run locally:
+
+```bash
+PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
+"$PYTHON" -m ruff check app/ tests/
+"$PYTHON" -m pytest tests/ -v
+```
+
+---
+
+## Monitoring
+
+The stack ships Prometheus + Grafana out of the box — no manual setup needed. Both are provisioned automatically on `make dev` / `make prod`.
+
+### Prometheus
+
+Scrapes the FastAPI `/metrics` endpoint every 15 seconds. Metrics include:
+
+- **RED**: request rate, error rate (5xx), response latency (p50/p95/p99) — per endpoint
+- **Process**: Python RSS memory, virtual memory, CPU, GC stats
+
+Config files:
+- `monitoring/prometheus.dev.yml` — scrapes `api:8001`
+- `monitoring/prometheus.yml` — scrapes `api:8000` (prod)
+
+Access: http://localhost:9090 (dev) / http://localhost:9091 (prod)
+
+### Grafana
+
+Auto-provisioned with a Prometheus datasource and a pre-built **"Hadathana API Overview"** dashboard (11 panels):
+
+| Panel | Description |
+|-------|-------------|
+| Total requests / current req/s | Stat panels |
+| Avg latency / RSS memory | Stat panels |
+| Request rate by endpoint | Time series |
+| Error rate (5xx/total) | Time series |
+| Response latency p50/p95/p99 | Time series |
+| Latency by endpoint (p95) | Time series |
+| Requests in progress | Gauge |
+| Response size by endpoint | Time series |
+| Python memory (RSS + virtual) | Time series |
+
+Access: http://localhost:3002 (dev) / http://localhost:3001 (prod)
+Login: `admin` / value of `GRAFANA_ADMIN_PASSWORD` in `.env` (default: `admin`)
+
+Dashboard source: `monitoring/grafana/dashboards/api-overview.json`
+Provisioning: `monitoring/grafana/provisioning/`
+
+### Qdrant (dev only)
+
+Vector database for semantic hadith search. Runs on port `6333` in dev. The `hadiths_matn` collection holds 7,073 Cohere `embed-v4.0` vectors (1536-dim) with both dense and sparse (`text-sparse`) indexes.
+
+Access: http://localhost:6333/dashboard
 
 ---
 

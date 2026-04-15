@@ -107,12 +107,15 @@ The project uses Docker Compose with file merging to run **dev and prod simultan
 
 #### Environment allocation
 
-| | Dev | Prod |
-|---|---|---|
+| Service | Dev | Prod |
+|---------|-----|------|
 | API port | 8001 | 8000 |
 | MongoDB port | 27017 (exposed) | internal only |
+| Prometheus port | 9090 | 9091 |
+| Grafana port | 3002 | 3001 |
+| Qdrant port | 6333 (dev only) | — |
 | Database | `HadithDataDev` | `HadithData` |
-| Volume | `hadathana_mongodb_dev` | `hadathana_mongodb_prod` |
+| Volume prefix | `hadathana_*_dev` | `hadathana_*_prod` |
 | Containers | `hadathana-*-dev` | `hadathana-*-prod` |
 | Code reload | Yes (`--reload` + volume mount) | No (baked into image) |
 
@@ -195,9 +198,12 @@ make dev   # or make prod
 
 #### Adding future services
 
-Add new services to `docker-compose.yml` (base). Commented-out templates for Qdrant and mongo-express are already included.
+Add new services to `docker-compose.yml` (base). A commented-out template for mongo-express is included.
 
 API docs: http://localhost:8001/docs (dev) / http://localhost:8000/docs (prod)
+Grafana: http://localhost:3002 (dev) / http://localhost:3001 (prod)
+Prometheus: http://localhost:9090 (dev) / http://localhost:9091 (prod)
+Qdrant: http://localhost:6333/dashboard (dev only)
 
 ### Bootstrap script (standalone)
 
@@ -227,6 +233,48 @@ Imports all JSONL files + indexes + stats + topics + embeddings in one command.
 PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 "$PYTHON" -m pytest tests/ -v
 ```
+
+### Linting (ruff)
+
+```bash
+PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
+"$PYTHON" -m ruff check app/ tests/
+"$PYTHON" -m ruff check app/ tests/ --fix   # auto-fix safe violations
+```
+
+Ruff config lives in `pyproject.toml`. The CI pipeline runs `ruff check app/ tests/` (no auto-fix).
+
+### CI/CD (GitHub Actions)
+
+Pipeline runs on every PR targeting `main`. Workflow: `.github/workflows/ci.yml`.
+
+| Job | Runs | What it does |
+|-----|------|--------------|
+| `lint` | first | `ruff check app/ tests/` — fails on any violation |
+| `test` | after lint passes | `pytest tests/ -v` with `APP_ENV=dev` and a local MongoDB URI |
+
+Tests use `APP_ENV=dev` + `MONGODB_URI_LOCAL=mongodb://localhost:27017/` (no real DB needed — tests mock at the collection level).
+
+### Monitoring
+
+**Prometheus** (`monitoring/prometheus.dev.yml` / `monitoring/prometheus.yml`):
+- Scrapes `/metrics` every 15s
+- Dev: `api:8001` → http://localhost:9090
+- Prod: `api:8000` → http://localhost:9091
+- 30-day metric retention
+
+**Grafana** (`monitoring/grafana/`):
+- Auto-provisioned datasource: `monitoring/grafana/provisioning/datasources/prometheus.yml`
+- Auto-provisioned dashboard file provider: `monitoring/grafana/provisioning/dashboards/dashboards.yml`
+- Pre-built "Hadathana API Overview" dashboard: `monitoring/grafana/dashboards/api-overview.json` (11 panels: request rate, error rate, latency p50/p95/p99, latency by endpoint, requests in progress, response size, Python memory)
+- Dev: http://localhost:3002 | Prod: http://localhost:3001
+- Login: `admin` / `GRAFANA_ADMIN_PASSWORD` env var (default: `admin`)
+
+**Qdrant** (dev only, port 6333):
+- Vector DB for semantic hadith search
+- Collection `hadiths_matn`: 7,073 points, Cohere `embed-v4.0` 1536-dim vectors
+- Both dense and sparse (`text-sparse`) indexes for hybrid search
+- Dashboard: http://localhost:6333/dashboard
 
 ### MongoDB Data Pipeline (Shamela)
 

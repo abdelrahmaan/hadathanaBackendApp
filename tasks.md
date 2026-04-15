@@ -209,11 +209,11 @@
 - [ ] Mobile optimization
 
 ### Testing & CI/CD
-- [ ] Unit tests for API endpoints (pytest + httpx)
+- [x] Unit tests for API endpoints (pytest + httpx)
 - [ ] Integration tests with MongoDB test database
-- [ ] CI/CD pipeline (GitHub Actions): run tests + linting on every PR, block merge to `main` if checks fail
-- [ ] Automated linting and type checking (ruff / mypy in CI)
-- [ ] Branch protection rule on `main`: require passing CI checks before merge
+- [x] CI/CD pipeline (GitHub Actions): run tests + linting on every PR, block merge to `main` if checks fail — `.github/workflows/ci.yml` (lint job: ruff; test job: pytest)
+- [x] Automated linting and type checking (ruff in CI)
+- [ ] Branch protection rule on `main`: require passing CI checks before merge (manual GitHub settings step)
 
 ### Auto Deployment
 - [ ] Auto-deploy on push to `main` (Railway / Render webhook or GitHub Actions deploy step)
@@ -255,6 +255,14 @@
 ---
 
 ## Chore Log
+
+### docs: update README and CLAUDE.md for CI/CD, Grafana, Prometheus, Qdrant (2026-04-15)
+**Status**: done
+**Summary**: Documented all new infrastructure added since last docs update. README now has a CI/CD section (GitHub Actions workflow, lint + test jobs, how to run locally) and a Monitoring section (Prometheus, Grafana with dashboard panel list, Qdrant). CLAUDE.md updated with full port allocation table for all services, linting commands, CI/CD pipeline docs, and a Monitoring section covering Prometheus configs, Grafana provisioning paths, and Qdrant collection details. Updated Testing & CI/CD checklist in tasks.md to reflect completed items.
+**Touched files**:
+- `README.md` (added Services and Ports table, CI/CD section, Monitoring section)
+- `CLAUDE.md` (updated environment allocation table, added CI/CD and Monitoring sections under Common Commands)
+- `tasks.md`
 
 ### feat: Grafana dashboards — Phase 2 monitoring (2026-04-06)
 **Status**: done
