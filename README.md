@@ -1,6 +1,13 @@
 # Hadathana API
 
-FastAPI + MongoDB backend for the Hadathana Islamic hadith app. Exposes Sahih al-Bukhari data from two independent pipelines (Shamela and Podia) with narrator chain analysis.
+FastAPI + MongoDB backend for the Hadathana Islamic hadith platform. Exposes the full Sahih al-Bukhari corpus (7,000+ hadiths) from two independent data pipelines with narrator chain analysis, Arabic semantic search, and an AI-powered RAG chatbot — **Al-Rawi**.
+
+**System at a glance:**
+- **7,076 hadiths** (Podia) + **7,008 hadiths** (Shamela) — two independent pipelines
+- **98.3%** narrator disambiguation accuracy across 1,555 ambiguous name pairs
+- **Hybrid semantic search** — Cohere `embed-v4.0` dense + BM25 sparse vectors, Cohere multilingual reranker
+- **Al-Rawi chatbot** — LangChain RAG agent with SSE streaming, MongoDB session persistence, cited answers
+- **32,000+ API requests** served · **~10.9 ms** avg latency · users across US, Egypt, Europe
 
 ---
 
@@ -59,7 +66,7 @@ On first run, `mongo-init` auto-bootstraps the database from JSONL files. Subseq
 | MongoDB | `27017` | internal | Exposed only in dev |
 | Prometheus | `9090` | `9091` | Metrics scraper (30-day retention) |
 | Grafana | `3002` | `3001` | Dashboards (login: admin / see `.env`) |
-| Qdrant | `6333` | — | Vector DB for semantic search (dev only) |
+| Qdrant | `6333` | `6333` | Vector DB — hadiths_matn collection (7,073 vectors) |
 
 ---
 
@@ -165,9 +172,12 @@ Login: `admin` / value of `GRAFANA_ADMIN_PASSWORD` in `.env` (default: `admin`)
 Dashboard source: `monitoring/grafana/dashboards/api-overview.json`
 Provisioning: `monitoring/grafana/provisioning/`
 
-### Qdrant (dev only)
+### Qdrant
 
-Vector database for semantic hadith search. Runs on port `6333` in dev. The `hadiths_matn` collection holds 7,073 Cohere `embed-v4.0` vectors (1536-dim) with both dense and sparse (`text-sparse`) indexes.
+Vector database for hybrid semantic hadith search. The `hadiths_matn` collection holds **7,073 points** with:
+- **Dense vectors** — 1,536-dim Cohere `embed-v4.0` embeddings
+- **Sparse vectors** — BM25 via FastEmbed (`text-sparse`) for keyword recall
+- **Payload** — `matn_text_plain`, `book`, `chapter`, `topics`, `title`, `hadith_url`, `narrators`
 
 Access: http://localhost:6333/dashboard
 
@@ -188,6 +198,93 @@ PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 
 # Force re-import
 "$PYTHON" scripts/bootstrap_local_db.py --force
+```
+
+---
+
+## Al-Rawi — RAG Chatbot
+
+**Al-Rawi** ("the narrator") is an AI assistant that answers Islamic questions grounded exclusively in Sahih al-Bukhari. It is exposed at `POST /api/v2/chat` and streams responses via Server-Sent Events (SSE).
+
+### Architecture
+
+```
+User question
+    │
+    ▼
+LangChain Agent (LangGraph, tool-calling)
+    │  calls search_hadiths tool
+    ▼
+Hybrid Retriever (Qdrant)
+    ├── Dense: Cohere embed-v4.0  ──┐
+    └── Sparse: BM25 (FastEmbed) ──┴─► merged candidates (top-20)
+    │
+    ▼
+Cohere Reranker (rerank-multilingual-v3.0, top-5)
+    │  relevance score filter (≥ 0.30)
+    ▼
+LLM (via OpenRouter) — streams Arabic answer with citations
+    │
+    ▼
+SSE stream: assistant_message_start → content chunks → assistant_message_complete
+            → thread_rename → stream_end
+    │
+    ▼
+MongoDB session persistence (chat_sessions collection)
+```
+
+### Key design decisions
+
+| Decision | Detail |
+|----------|--------|
+| Hybrid search | Dense + BM25 combined — better recall for rare terms |
+| Reranker | Cohere multilingual v3 — re-scores candidates, not keywords |
+| Relevance filter | Docs scoring < 0.30 dropped before reaching the LLM |
+| Grounding | LLM instructed never to answer from prior knowledge |
+| Citations | Each passage numbered [١][٢]… — REFS:[n,n] parsed from LLM output → `Citation` objects returned to frontend |
+| Thread titles | Auto-generated (Gemini Flash) on first turn — `thread_rename` SSE event |
+| Session store | MongoDB `chat_sessions` collection — full turn history persisted |
+
+### SSE event stream
+
+```
+data: {"type": "assistant_message_start", "content": "", "session_id": "..."}
+data: {"type": "content", "content": "إنما الأعمال بالنيات"}
+...
+data: {"type": "assistant_message_complete", "data": {"message_type": "assistant", "content": "...", "citations": [...]}}
+data: {"type": "thread_rename", "title": "أول حديث في صحيح البخاري"}
+data: {"type": "stream_end"}
+```
+
+### Chatbot module layout
+
+```
+app/chatbot/
+├── agent.py       # LangChain create_agent + search_hadiths @tool
+├── retriever.py   # Hybrid Qdrant retriever + Cohere reranker
+├── indexer.py     # Qdrant collection setup + Mongo → Qdrant sync
+├── router.py      # FastAPI SSE endpoint (POST /api/v2/chat)
+├── session.py     # MongoDB session persistence
+├── models.py      # ChatRequest, Citation, SessionTurn
+├── prompts.py     # Arabic system prompt + thread rename prompt
+├── config.py      # Module constants (collection, model names, thresholds)
+└── qdrant.py      # QdrantClient singleton
+```
+
+### Test the chatbot
+
+```bash
+# Smoke test — SSE stream (watch events appear)
+curl -s -X POST http://localhost:8001/api/v2/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "ما هو أول حديث في صحيح البخاري؟"}' \
+  --no-buffer
+
+# Run unit tests
+make test-chatbot
+
+# Run smoke tests against dev
+make test-chatbot-dev
 ```
 
 ---
@@ -216,7 +313,8 @@ PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 | GET | `/api/v2/narrators/{rawi_id}/stats` | — | `PodiaNarratorStats` |
 | GET | `/api/v2/topics` | — | `TopicsResponse` |
 | GET | `/api/v2/topics/{topic}/hadiths` | `skip`, `limit` | `PaginatedPodiaHadiths` |
-| GET | `/health` | — | `{ "status": "ok" }` |
+| POST | `/api/v2/chat` | body: `{ "question", "session_id?" }` | SSE stream (see Al-Rawi section) |
+| GET | `/health` | — | `{ "status": "ok", "chatbot": true }` |
 
 ---
 
@@ -240,6 +338,17 @@ curl http://localhost:8000/api/v2/narrators/822/tarajem
 curl http://localhost:8000/api/v2/narrators/822/stats
 curl http://localhost:8000/api/v2/topics
 curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
+```
+
+# Al-Rawi chatbot (SSE stream)
+curl -s -X POST http://localhost:8000/api/v2/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "ما حكم الصلاة في وقتها؟"}' --no-buffer
+
+# Continue a session
+curl -s -X POST http://localhost:8000/api/v2/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "هل هناك أحاديث أخرى؟", "session_id": "<id from first response>"}' --no-buffer
 ```
 
 Search is normalization-tolerant — these all return the same results:
