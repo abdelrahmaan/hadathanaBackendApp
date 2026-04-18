@@ -419,6 +419,28 @@ make test-chatbot-dev
 
 ## Endpoints
 
+### Auth
+
+All auth endpoints are under `/auth`. Login uses **form data** (`application/x-www-form-urlencoded`), all others use JSON. Sessions are managed via **HttpOnly cookies** — frontend must send requests with `credentials: "include"` (fetch) or `withCredentials: true` (axios).
+
+| Method | Path | Body | Response | Notes |
+|--------|------|------|----------|-------|
+| POST | `/auth/register` | `{ "email", "password" }` | `201` UserRead | |
+| POST | `/auth/login` | form: `username=&password=` | `204` + sets cookie | |
+| POST | `/auth/logout` | — | `204` + clears cookie | |
+| POST | `/auth/forgot-password` | `{ "email" }` | `202` always | No user enumeration |
+| POST | `/auth/reset-password` | `{ "token", "password" }` | `200` | Token from email link |
+
+### Bookmarks (authenticated)
+
+Require valid session cookie. Returns `401` if not logged in.
+
+| Method | Path | Body | Response |
+|--------|------|------|----------|
+| GET | `/api/v2/bookmarks` | — | `{ items[], total }` (skip/limit) |
+| POST | `/api/v2/bookmarks` | `{ "hadith_url", "source" }` | `201` BookmarkRead · `409` if duplicate |
+| DELETE | `/api/v2/bookmarks/{hadith_url}` | — | `204` · `404` if not found |
+
 ### v1 — Shamela
 
 | Method | Path | Query params | Response |
@@ -492,6 +514,21 @@ Response is `text/event-stream` (SSE). Event types:
 # Health
 curl http://localhost:8001/health
 
+# Auth
+curl -X POST http://localhost:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"Str0ngPass!123"}'
+
+curl -c cookies.txt -X POST http://localhost:8000/auth/login \
+  -d 'username=user@example.com&password=Str0ngPass!123'
+
+# Bookmarks (authenticated)
+curl -b cookies.txt http://localhost:8000/api/v2/bookmarks
+curl -b cookies.txt -X POST http://localhost:8000/api/v2/bookmarks \
+  -H "Content-Type: application/json" \
+  -d '{"hadith_url":"https://hadathana.app/hadith/1","source":"podia"}'
+curl -b cookies.txt -X DELETE "http://localhost:8000/api/v2/bookmarks/https%3A%2F%2Fhadathana.app%2Fhadith%2F1"
+
 # v1 — Shamela
 curl http://localhost:8001/api/v1/hadiths
 curl "http://localhost:8001/api/v1/hadiths?hadith_plain=نام"
@@ -499,14 +536,19 @@ curl "http://localhost:8001/api/v1/hadiths?narrator_id=822"
 curl http://localhost:8001/api/v1/narrators/822/stats
 
 # v2 — Podia
-curl http://localhost:8001/api/v2/hadiths
-curl "http://localhost:8001/api/v2/hadiths?hadith_text_plain=الصلاة"
-curl "http://localhost:8001/api/v2/hadiths?topic=الصلاة"
-curl http://localhost:8001/api/v2/narrators/822/tarajem
-curl http://localhost:8001/api/v2/topics
-curl "http://localhost:8001/api/v2/topics/الصلاة/hadiths"
-```
+curl http://localhost:8000/api/v2/hadiths
+curl "http://localhost:8000/api/v2/hadiths?hadith_text_plain=الصلاة"
+curl "http://localhost:8000/api/v2/hadiths?topic=الصلاة"
+curl http://localhost:8000/api/v2/narrators/822/tarajem
+curl http://localhost:8000/api/v2/narrators/822/stats
+curl http://localhost:8000/api/v2/topics
+curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
 
+# Al-Rawi chatbot (SSE stream)
+curl -s -X POST http://localhost:8000/api/v2/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "ما حكم الصلاة في وقتها؟"}' --no-buffer
+```
 
 ### Arabic Search Normalization
 
