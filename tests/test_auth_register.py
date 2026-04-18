@@ -1,6 +1,5 @@
 """Tests for POST /auth/register — success and validation cases."""
 
-import importlib
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 

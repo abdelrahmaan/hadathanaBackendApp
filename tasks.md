@@ -256,6 +256,20 @@
 
 ## Chore Log
 
+### test: auth and bookmarks test suite — Tasks 10–14 (2026-04-18)
+**Status**: done
+**Summary**: Wrote full test coverage for auth and bookmarks endpoints. All 40 tests pass; ruff reports no violations.
+- Task 10: Updated `tests/conftest.py` with `make_mock_collection()` helper and patches for `get_auth_users_collection` and `get_bookmarks_collection`. Verified `test_auth_register.py` covers 201 success, 422 invalid email, 422 missing password.
+- Task 11: Verified `test_auth_login.py` covers 400 unknown email and 422 missing fields.
+- Task 12: Verified `test_auth_forgot_password.py` covers 202 for unknown and known email (with Resend mock). Verified `test_auth_reset_password.py` covers 400 invalid token and 422 missing token field.
+- Task 13: Verified `test_bookmarks.py` covers 401 unauthenticated, 200 authenticated list, 201 add, 409 duplicate, 204 delete.
+- Task 14: Ran `pytest tests/ -v` (40/40 passed) and `ruff check app/ tests/` (clean). Fixed one unused `importlib` import in `test_auth_register.py`.
+**Key finding**: All test files were already present but `test_auth_register.py` had a stray `import importlib` (unused). Removed it to pass ruff.
+**Touched files**:
+- `tests/conftest.py`
+- `tests/test_auth_register.py` (removed unused import)
+- `tasks.md`
+
 ### feat: auth and bookmarks backend — Tasks 2–9 (2026-04-18)
 **Status**: done
 **Summary**: Implemented full authentication and bookmarks backend using fastapi-users v15.
