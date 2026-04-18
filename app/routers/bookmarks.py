@@ -1,9 +1,9 @@
 """Authenticated bookmarks router.
 
 Endpoints:
-    GET    /api/v1/bookmarks         — list the authenticated user's bookmarks (paginated)
-    POST   /api/v1/bookmarks         — add a new bookmark
-    DELETE /api/v1/bookmarks/{hadith_url} — remove a bookmark
+    GET    /api/v2/bookmarks         — list the authenticated user's bookmarks (paginated)
+    POST   /api/v2/bookmarks         — add a new bookmark
+    DELETE /api/v2/bookmarks/{hadith_url} — remove a bookmark
 """
 
 import logging
@@ -19,7 +19,7 @@ from ..database import get_bookmarks_collection, get_client, get_db
 
 logger = logging.getLogger("hadathana.bookmarks")
 
-router = APIRouter(prefix="/api/v1/bookmarks", tags=["bookmarks"])
+router = APIRouter(prefix="/api/v2/bookmarks", tags=["bookmarks"])
 
 
 # ------------------------------------------------------------------
