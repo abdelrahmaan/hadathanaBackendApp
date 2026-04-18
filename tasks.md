@@ -573,3 +573,27 @@
 - `Makefile` (new — dev/prod/status/health convenience targets)
 - `CLAUDE.md` (rewritten Docker section with dev/prod allocation table, Makefile commands, promotion workflow)
 - `tasks.md`
+
+### feat: auth (sign up / sign in / forgot+reset password) + bookmarks (2026-04-18)
+**Status**: done
+**Summary**: Added full user auth system using fastapi-users v15 with a custom Motor adapter (MongoDBUserDatabase was removed in v13+). HttpOnly cookie sessions (JWT, 15-min TTL). Resend for transactional email. Rate limiting via slowapi. Bookmarks CRUD at /api/v2/bookmarks (authenticated). 42 tests passing.
+**Touched files**:
+- `app/auth/__init__.py` (new)
+- `app/auth/models.py` (new — User, UserRead, UserCreate, UserUpdate)
+- `app/auth/database.py` (new — custom MotorUserDatabase adapter)
+- `app/auth/config.py` (new — UserManager, cookie transport, JWT strategy, auth_backend)
+- `app/routers/bookmarks.py` (new — GET/POST/DELETE /api/v2/bookmarks)
+- `app/database.py` (added get_auth_users_collection, get_bookmarks_collection)
+- `app/config.py` (added jwt_secret, token TTLs, resend_api_key, from_email)
+- `app/main.py` (mounted auth + bookmark routers, slowapi, updated CORS)
+- `mongo_migration/create_indexes.py` (auth_users, reset tokens, refresh sessions, bookmarks indexes)
+- `requirements.txt` (added fastapi-users, slowapi, resend)
+- `.env.example` (added auth + email env vars)
+- `tests/conftest.py` (updated fixtures)
+- `tests/test_auth_register.py` (new)
+- `tests/test_auth_login.py` (new)
+- `tests/test_auth_forgot_password.py` (new)
+- `tests/test_auth_reset_password.py` (new)
+- `tests/test_bookmarks.py` (new)
+- `README.md` (added Auth and Bookmarks endpoint sections)
+- `tasks.md`
