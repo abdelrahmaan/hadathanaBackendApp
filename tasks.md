@@ -196,7 +196,7 @@
 ## v2.0 - Production Release
 
 ### API Enhancements
-- [ ] Add API authentication and rate limiting
+- [x] Add API authentication and rate limiting
 - [ ] Add write endpoints (POST/PUT/DELETE) for data management
 - [ ] Auto-generated API documentation (Swagger/ReDoc polish)
 - [ ] Response caching for frequently accessed data
@@ -255,6 +255,32 @@
 ---
 
 ## Chore Log
+
+### feat: auth and bookmarks backend — Tasks 2–9 (2026-04-18)
+**Status**: done
+**Summary**: Implemented full authentication and bookmarks backend using fastapi-users v15.
+- Task 2: Extended `Settings` with jwt_secret, token lifetimes, resend_api_key, from_email; updated .env.example.
+- Task 3: Added `get_auth_users_collection()` and `get_bookmarks_collection()` to database.py.
+- Task 4: Created `app/auth/` package with `User` (internal DB model with hashed_password), `UserRead`, `UserCreate`, `UserUpdate` Pydantic schemas.
+- Task 5: Implemented `MotorUserDatabase` — custom `BaseUserDatabase` subclass for Motor async MongoDB (MongoDBUserDatabase was removed in v13+).
+- Task 6: Configured `UserManager` (UUIDIDMixin, email hooks via Resend), HttpOnly cookie transport, HS256 JWT strategy, `auth_backend`, `current_active_user` dependency.
+- Task 7: Added authenticated bookmarks router (`GET/POST/DELETE /api/v1/bookmarks`).
+- Task 8: Updated main.py — mounted auth routes (/auth/login, /auth/register, /auth/forgot-password, /auth/verify), bookmarks router, slowapi rate limiter, updated CORS to allow POST/DELETE/OPTIONS.
+- Task 9: Added MongoDB indexes for auth_users (unique email+id), TTL indexes for reset/refresh tokens, compound unique index for user_bookmarks.
+**Key deviation**: fastapi-users v15 uses a separate `User` model (with hashed_password) as the `UP` type, distinct from `UserRead` (the public API schema with no hashed_password). The plan's `BaseUserManager[UserRead, UUID]` generic was incorrect — corrected to `BaseUserManager[User, UUID]`.
+**Verification**: `from app.main import app` import OK; all 26 existing tests pass; ruff clean.
+**Touched files**:
+- `app/config.py`
+- `.env.example`
+- `app/database.py`
+- `app/auth/__init__.py` (new)
+- `app/auth/models.py` (new)
+- `app/auth/database.py` (new)
+- `app/auth/config.py` (new)
+- `app/routers/bookmarks.py` (new)
+- `app/main.py`
+- `mongo_migration/create_indexes.py`
+- `tasks.md`
 
 ### docs: update README and CLAUDE.md for CI/CD, Grafana, Prometheus, Qdrant (2026-04-15)
 **Status**: done
