@@ -113,6 +113,22 @@ INDEXES = {
         ([("rawi_id", ASCENDING)], {"unique": True}),
         ([("full_name_plain", ASCENDING)], {}),
     ],
+    "auth_users": [
+        ([("email", ASCENDING)], {"unique": True}),
+        ([("id", ASCENDING)], {"unique": True}),
+    ],
+    "auth_password_reset_tokens": [
+        ([("token_hash", ASCENDING)], {}),
+        ([("expires_at", ASCENDING)], {"expireAfterSeconds": 0}),
+    ],
+    "auth_refresh_sessions": [
+        ([("token_hash", ASCENDING)], {}),
+        ([("expires_at", ASCENDING)], {"expireAfterSeconds": 0}),
+    ],
+    "user_bookmarks": [
+        ([("user_id", ASCENDING), ("hadith_url", ASCENDING)], {"unique": True}),
+        ([("user_id", ASCENDING), ("created_at", ASCENDING)], {}),
+    ],
 }
 
 

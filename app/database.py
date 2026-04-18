@@ -74,6 +74,14 @@ def get_chat_sessions_collection(db):
     return db[name]
 
 
+def get_auth_users_collection(db):
+    return db["auth_users"]
+
+
+def get_bookmarks_collection(db):
+    return db["user_bookmarks"]
+
+
 async def connect():
     global _client
     _client = AsyncIOMotorClient(settings.get_mongodb_uri())

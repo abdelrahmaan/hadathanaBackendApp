@@ -4,14 +4,20 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 
-@pytest_asyncio.fixture
-async def client():
-    """AsyncClient with mocked MongoDB so no live DB is needed."""
+def make_mock_collection():
     mock_collection = MagicMock()
     mock_collection.find.return_value.__aiter__ = AsyncMock(return_value=iter([]))
     mock_collection.count_documents = AsyncMock(return_value=0)
     mock_collection.find_one = AsyncMock(return_value=None)
+    mock_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="mock_id"))
+    mock_collection.delete_one = AsyncMock(return_value=MagicMock(deleted_count=1))
+    return mock_collection
 
+
+@pytest_asyncio.fixture
+async def client():
+    """AsyncClient with mocked MongoDB so no live DB is needed."""
+    mock_collection = make_mock_collection()
     mock_db = MagicMock()
     mock_client = MagicMock()
 
@@ -23,7 +29,9 @@ async def client():
          patch("app.database.get_hadiths_collection", return_value=mock_collection), \
          patch("app.database.get_narrators_collection", return_value=mock_collection), \
          patch("app.database.get_podia_hadiths_collection", return_value=mock_collection), \
-         patch("app.database.get_podia_narrators_collection", return_value=mock_collection):
+         patch("app.database.get_podia_narrators_collection", return_value=mock_collection), \
+         patch("app.database.get_auth_users_collection", return_value=mock_collection), \
+         patch("app.database.get_bookmarks_collection", return_value=mock_collection):
         from app.main import app
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             yield c

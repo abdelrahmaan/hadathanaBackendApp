@@ -6,7 +6,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
+from .auth.config import auth_backend, fastapi_users
+from .auth.models import UserCreate, UserRead
 from .config import settings
 from .database import (
     connect,
@@ -23,6 +28,7 @@ if settings.chatbot_enabled:
 from .logging_config import setup_logging
 from .middleware import RequestLoggingMiddleware
 from .routers import (
+    bookmarks,
     hadiths_podia,
     hadiths_shamela,
     narrators_podia,
@@ -33,6 +39,8 @@ from .routers import (
 setup_logging()
 
 logger = logging.getLogger("hadathana.main")
+
+limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
@@ -51,6 +59,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="hadathana-api", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # RequestLoggingMiddleware must be added first (executes outermost = sees final status)
 # Starlette middleware stack is LIFO: last add_middleware call = innermost wrapper
@@ -58,9 +68,39 @@ app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_cors_origins(),
-    allow_methods=["GET", "POST"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# ------------------------------------------------------------------
+# Auth routes
+# ------------------------------------------------------------------
+
+app.include_router(
+    fastapi_users.get_auth_router(auth_backend),
+    prefix="/auth",
+    tags=["auth"],
+)
+app.include_router(
+    fastapi_users.get_register_router(UserRead, UserCreate),
+    prefix="/auth",
+    tags=["auth"],
+)
+app.include_router(
+    fastapi_users.get_reset_password_router(),
+    prefix="/auth",
+    tags=["auth"],
+)
+app.include_router(
+    fastapi_users.get_verify_router(UserRead),
+    prefix="/auth",
+    tags=["auth"],
+)
+
+# ------------------------------------------------------------------
+# Data routes
+# ------------------------------------------------------------------
 
 app.include_router(hadiths_shamela.router)
 app.include_router(narrators_shamela.router)
@@ -69,6 +109,7 @@ app.include_router(narrators_podia.router)
 app.include_router(search_podia.router)
 if settings.chatbot_enabled:
     app.include_router(chatbot_router)
+app.include_router(bookmarks.router)
 
 Instrumentator().instrument(app).expose(app)
 

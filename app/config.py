@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://qdrant:6333"
     chatbot_model: str = "google/gemini-3-flash-preview"
 
+    # Auth (JWT + session)
+    jwt_secret: str = "changeme-generate-with-openssl-rand-hex-32"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
+    reset_token_expire_minutes: int = 30
+
+    # Email (Resend)
+    resend_api_key: str = ""
+    from_email: str = "noreply@hadathana.app"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @property
