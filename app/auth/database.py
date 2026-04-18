@@ -47,6 +47,10 @@ class MotorUserDatabase(BaseUserDatabase[User, uuid.UUID]):
         # Normalise email to lower-case before storing.
         if "email" in create_dict:
             create_dict["email"] = create_dict["email"].lower()
+        # Ensure boolean defaults are explicitly stored for direct MongoDB queries.
+        create_dict.setdefault("is_active", True)
+        create_dict.setdefault("is_superuser", False)
+        create_dict.setdefault("is_verified", False)
         await self.collection.insert_one(create_dict)
         return self._doc_to_user(create_dict)
 

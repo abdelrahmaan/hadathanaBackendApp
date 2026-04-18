@@ -149,3 +149,6 @@ async def test_forgot_password_known_email_returns_202(forgot_pw_client_known_us
         )
 
     assert response.status_code == 202
+    mock_send.assert_called_once()
+    call_args = mock_send.call_args[0][0]
+    assert "known@example.com" in call_args["to"]

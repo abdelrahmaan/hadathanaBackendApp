@@ -5,6 +5,7 @@ fastapi-users uses OAuth2PasswordRequestForm, so the form fields are
 """
 
 import sys
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -78,6 +79,68 @@ async def login_client_unknown_user():
     finally:
         for p in reversed(stack):
             p.stop()
+
+
+@pytest_asyncio.fixture
+async def login_client_known_user():
+    """Client where get_user_db returns a valid user with a correct hashed password."""
+    for mod in list(sys.modules.keys()):
+        if mod.startswith("app"):
+            sys.modules.pop(mod, None)
+
+    from pwdlib import PasswordHash
+    from pwdlib.hashers.argon2 import Argon2Hasher
+
+    password_hash = PasswordHash([Argon2Hasher()])
+    hashed = password_hash.hash("Str0ngPassword!")
+
+    user_doc = {
+        "id": str(uuid.uuid4()),
+        "email": "known@example.com",
+        "hashed_password": hashed,
+        "is_active": True,
+        "is_superuser": False,
+        "is_verified": False,
+    }
+
+    user_col = _make_user_collection(find_one_return=user_doc)
+    # update_one needed when fastapi-users updates last_login or similar fields
+    user_col.update_one = AsyncMock(return_value=MagicMock())
+    other_col = _make_other_collection()
+
+    stack = _patches(user_col, other_col)
+    for p in stack:
+        p.start()
+
+    try:
+        from app.auth.database import MotorUserDatabase, get_user_db
+        from app.main import app
+
+        async def override_get_user_db():
+            yield MotorUserDatabase(user_col)
+
+        app.dependency_overrides[get_user_db] = override_get_user_db
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+
+        app.dependency_overrides.clear()
+    finally:
+        for p in reversed(stack):
+            p.stop()
+
+
+@pytest.mark.asyncio
+async def test_login_success_sets_cookie(login_client_known_user):
+    """Successful login returns 200 and sets the access_token cookie."""
+    response = await login_client_known_user.post(
+        "/auth/login",
+        data={"username": "known@example.com", "password": "Str0ngPassword!"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    # fastapi-users CookieTransport returns 204 No Content on successful login
+    assert response.status_code == 204
+    assert "access_token" in response.cookies
 
 
 @pytest.mark.asyncio

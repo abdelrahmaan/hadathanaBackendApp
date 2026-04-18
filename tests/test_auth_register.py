@@ -1,6 +1,7 @@
 """Tests for POST /auth/register — success and validation cases."""
 
 import sys
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -67,6 +68,51 @@ async def register_client():
         app.dependency_overrides.clear()
 
 
+@pytest_asyncio.fixture
+async def register_client_duplicate_email():
+    """Client where get_user_db returns an existing user (email already taken)."""
+    for mod in list(sys.modules.keys()):
+        if mod.startswith("app"):
+            sys.modules.pop(mod, None)
+
+    existing_user_doc = {
+        "id": str(uuid.uuid4()),
+        "email": "taken@example.com",
+        "hashed_password": "$argon2id$fakehash",
+        "is_active": True,
+        "is_superuser": False,
+        "is_verified": False,
+    }
+
+    user_col = _make_user_collection(find_one_return=existing_user_doc)
+    other_col = _make_other_collection()
+
+    with patch("app.database.connect", new_callable=AsyncMock), \
+         patch("app.database.disconnect", new_callable=AsyncMock), \
+         patch("app.database.validate_connection", new_callable=AsyncMock), \
+         patch("app.database.get_client", return_value=MagicMock()), \
+         patch("app.database.get_db", return_value=MagicMock()), \
+         patch("app.database.get_hadiths_collection", return_value=other_col), \
+         patch("app.database.get_narrators_collection", return_value=other_col), \
+         patch("app.database.get_podia_hadiths_collection", return_value=other_col), \
+         patch("app.database.get_podia_narrators_collection", return_value=other_col), \
+         patch("app.database.get_auth_users_collection", return_value=user_col), \
+         patch("app.database.get_bookmarks_collection", return_value=other_col):
+
+        from app.auth.database import MotorUserDatabase, get_user_db
+        from app.main import app
+
+        async def override_get_user_db():
+            yield MotorUserDatabase(user_col)
+
+        app.dependency_overrides[get_user_db] = override_get_user_db
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+
+        app.dependency_overrides.clear()
+
+
 @pytest.mark.asyncio
 async def test_register_success(register_client):
     """POST /auth/register with valid credentials returns 201 and no hashed_password."""
@@ -99,3 +145,13 @@ async def test_register_missing_password(register_client):
         json={"email": "test@example.com"},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_duplicate_email_returns_400(register_client_duplicate_email):
+    """POST /auth/register with an already-taken email returns 400."""
+    response = await register_client_duplicate_email.post(
+        "/auth/register",
+        json={"email": "taken@example.com", "password": "Str0ngPassword!"},
+    )
+    assert response.status_code == 400
