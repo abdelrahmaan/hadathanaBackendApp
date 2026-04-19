@@ -244,14 +244,25 @@
 - [x] LangChain `create_tool_calling_agent` + `AgentExecutor` with `@tool search_hadiths`
 - [x] OpenRouter LLM (model configurable via `CHATBOT_MODEL` env var)
 - [x] `POST /api/v2/chat` SSE endpoint — exact event format with `assistant_message_start`, `content`, `assistant_message_complete` (with citations), `thread_rename`, `stream_end`
-- [x] Session management: `session_id` (UUID) per conversation, history stored in `chat_sessions` MongoDB collection
+- [x] Authenticated session management: `POST /api/v2/chat` requires auth, persists `user_id` ownership, stores history in `chat_sessions`, and exposes `GET/DELETE /api/v2/chat/sessions...`
 - [x] `scripts/sync_qdrant.py` — CLI to populate Qdrant from Mongo (idempotent)
 - [x] `qdrant` + `qdrant-init` Docker Compose services added to dev + prod stacks
 - [x] FastEmbed BM25 model pre-baked into Docker image
 - [x] CORS updated to allow POST
 - [x] 4 unit tests in `tests/test_chatbot_v1.py`
+- [x] Dedicated session API tests in `tests/test_chatbot_sessions.py` covering auth, ownership, list/get/delete, and delete-then-404 flow
 - [ ] Manual eval: test 10+ Arabic questions, tune system prompt
 - [ ] Promote to prod after eval passes
+
+### feat: complete chatbot user sessions spec (2026-04-18)
+**Status**: done
+**Summary**: Linked chatbot sessions to authenticated users. `ChatSession` gains `user_id` + `title` fields. `POST /api/v2/chat` now requires auth and enforces session ownership (403 on mismatch). Title is persisted after `thread_rename` event. Added `GET /api/v2/chat/sessions`, `GET /api/v2/chat/sessions/{id}`, `DELETE /api/v2/chat/sessions/{id}` endpoints. MongoDB indexes added for both session collections. 9 new tests cover auth gate, ownership, list, detail, and delete flows.
+**Touched files**:
+- `app/chatbot/models.py` — added `user_id`, `title` to `ChatSession`; added `ChatSessionMeta`
+- `app/chatbot/session.py` — `get_or_create_session` now takes `user_id` + ownership check; new `update_session_title`
+- `app/chatbot/router.py` — auth gate on `POST /chat`; title persistence; 3 new session endpoints
+- `mongo_migration/create_indexes.py` — `user_id+created_at` and `session_id` unique indexes for both session collections
+- `tests/test_chatbot_sessions.py` — 9 tests covering all session flows
 
 ### V2 — Narrator biographies (pending)
 - [ ] `scripts/embed_narrators.py` — Cohere embeddings for narrator bios

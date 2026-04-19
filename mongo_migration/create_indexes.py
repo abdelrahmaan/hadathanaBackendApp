@@ -129,6 +129,14 @@ INDEXES = {
         ([("user_id", ASCENDING), ("hadith_url", ASCENDING)], {"unique": True}),
         ([("user_id", ASCENDING), ("created_at", ASCENDING)], {}),
     ],
+    "chat_sessions_dev": [
+        ([("user_id", ASCENDING), ("created_at", ASCENDING)], {}),
+        ([("session_id", ASCENDING)], {"unique": True}),
+    ],
+    "chat_sessions_prod": [
+        ([("user_id", ASCENDING), ("created_at", ASCENDING)], {}),
+        ([("session_id", ASCENDING)], {"unique": True}),
+    ],
 }
 
 
