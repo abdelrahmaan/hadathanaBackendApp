@@ -371,7 +371,9 @@ MongoDB session persistence (chat_sessions collection)
 | Grounding | LLM instructed never to answer from prior knowledge |
 | Citations | Each passage numbered [١][٢]… — REFS:[n,n] parsed from LLM output → `Citation` objects returned to frontend |
 | Thread titles | Auto-generated (Gemini Flash) on first turn — `thread_rename` SSE event |
-| Session store | MongoDB `chat_sessions` collection — full turn history persisted |
+| Session store | MongoDB `chat_sessions_dev/prod` — full turn history persisted, owned by authenticated user |
+| Auth | `POST /api/v2/chat` requires JWT cookie — returns `401` if unauthenticated |
+| Ownership | Sessions are user-scoped — resuming another user's session returns `403` |
 
 ### SSE event stream
 
@@ -463,7 +465,10 @@ Require valid session cookie. Returns `401` if not logged in.
 | GET | `/api/v2/narrators/{rawi_id}/stats` | — | `PodiaNarratorStats` |
 | GET | `/api/v2/topics` | — | `TopicsResponse` |
 | GET | `/api/v2/topics/{topic}/hadiths` | `skip`, `limit` | `PaginatedPodiaHadiths` |
-| POST | `/api/v2/chat` | body: `{ "question", "session_id?" }` | SSE stream |
+| POST | `/api/v2/chat` | body: `{ "question", "session_id?" }` | SSE stream · **auth required** |
+| GET | `/api/v2/chat/sessions` | `skip`, `limit` | `[ChatSessionMeta]` · **auth required** |
+| GET | `/api/v2/chat/sessions/{session_id}` | — | `ChatSession` (full history) · **auth required** |
+| DELETE | `/api/v2/chat/sessions/{session_id}` | — | `204` · **auth required** |
 | GET | `/health` | — | `{ "status": "ok", "chatbot": true/false }` |
 
 ### Chatbot feature flag
@@ -482,18 +487,29 @@ docker restart hadathana-api-dev
 make prod-restart
 ```
 
-### Chatbot — POST /api/v2/chat
+### Chatbot — authenticated session endpoints
+
+All chatbot endpoints require a valid session cookie (login first via `POST /auth/login`).
 
 ```bash
 # New session (server generates session_id):
-curl -X POST http://localhost:8001/api/v2/chat \
+curl -b cookies.txt -X POST http://localhost:8001/api/v2/chat \
   -H 'Content-Type: application/json' \
   -d '{"question":"ما حكم النية في الصلاة؟"}' --no-buffer
 
 # Resume session (pass session_id from first assistant_message_start event):
-curl -X POST http://localhost:8001/api/v2/chat \
+curl -b cookies.txt -X POST http://localhost:8001/api/v2/chat \
   -H 'Content-Type: application/json' \
   -d '{"question":"وضح أكثر","session_id":"<uuid>"}' --no-buffer
+
+# List my sessions (metadata, no messages):
+curl -b cookies.txt http://localhost:8001/api/v2/chat/sessions
+
+# Get full session with message history:
+curl -b cookies.txt http://localhost:8001/api/v2/chat/sessions/<session_id>
+
+# Delete a session:
+curl -b cookies.txt -X DELETE http://localhost:8001/api/v2/chat/sessions/<session_id>
 ```
 
 Response is `text/event-stream` (SSE). Event types:
@@ -544,10 +560,15 @@ curl http://localhost:8000/api/v2/narrators/822/stats
 curl http://localhost:8000/api/v2/topics
 curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
 
-# Al-Rawi chatbot (SSE stream)
-curl -s -X POST http://localhost:8000/api/v2/chat \
+# Al-Rawi chatbot (SSE stream — requires auth cookie)
+curl -b cookies.txt -s -X POST http://localhost:8000/api/v2/chat \
   -H "Content-Type: application/json" \
   -d '{"question": "ما حكم الصلاة في وقتها؟"}' --no-buffer
+
+# Session management
+curl -b cookies.txt http://localhost:8000/api/v2/chat/sessions
+curl -b cookies.txt http://localhost:8000/api/v2/chat/sessions/<session_id>
+curl -b cookies.txt -X DELETE http://localhost:8000/api/v2/chat/sessions/<session_id>
 ```
 
 ### Arabic Search Normalization

@@ -25,7 +25,7 @@ app/chatbot/
   indexer.py      # Populate/sync Qdrant from MongoDB (idempotent, BM25 computed locally)
   retriever.py    # build_hadiths_retriever() — hybrid search + Cohere rerank + logging wrappers
   agent.py        # build_agent() — create_agent() + @tool search_hadiths
-  session.py      # get_or_create_session() / append_turn() — MongoDB persistence
+  session.py      # get_or_create_session() / append_turn() / update_session_title() — MongoDB persistence
   router.py       # POST /api/v2/chat — SSE streaming, pipeline logging
   CHATBOT.md      # This file
 ```
@@ -231,10 +231,14 @@ Sessions are stored in MongoDB, collection selected by `APP_ENV`:
 | `dev` | `chat_sessions_dev` |
 | `prod` | `chat_sessions_prod` |
 
+`POST /api/v2/chat` requires authentication (JWT cookie). Sessions are **user-scoped** — resuming another user's `session_id` returns `403`.
+
 Schema (`ChatSession`):
 
 ```python
 session_id: str          # UUID, generated server-side on first message
+user_id: str             # UUID string from auth User.id — set on creation
+title: str               # short Arabic title, auto-generated after first turn
 created_at: datetime
 messages: [
   { role: "user" | "assistant", content: str, citations: [], timestamp: datetime }
@@ -242,6 +246,26 @@ messages: [
 ```
 
 `session_id` is returned in `assistant_message_start` (new sessions only). Client must store and re-send it on every follow-up message.
+
+### Session management endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v2/chat/sessions` | List user's sessions — returns `[ChatSessionMeta]` (no messages), supports `skip`/`limit` |
+| `GET` | `/api/v2/chat/sessions/{session_id}` | Full session with all messages and citations |
+| `DELETE` | `/api/v2/chat/sessions/{session_id}` | Delete session — `403` if owned by another user |
+
+`ChatSessionMeta`:
+```python
+session_id: str
+title: str
+created_at: datetime
+message_count: int
+```
+
+MongoDB indexes on both session collections:
+- `{ user_id: 1, created_at: -1 }` — powers the list endpoint
+- `{ session_id: 1 }` unique — fast point lookups
 
 ---
 
