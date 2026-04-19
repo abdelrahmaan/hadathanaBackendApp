@@ -5,6 +5,7 @@ All external services (MongoDB, Qdrant, LangChain agent, Cohere) are mocked.
 No live connections required.
 """
 import json
+import uuid
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -80,6 +81,19 @@ def _parse_sse(text: str) -> list[dict]:
     return events
 
 
+def _make_mock_user():
+    from app.auth.models import User
+
+    return User(
+        id=uuid.uuid4(),
+        email="user@example.com",
+        hashed_password="$2b$12$fakehash",
+        is_active=True,
+        is_superuser=False,
+        is_verified=False,
+    )
+
+
 @pytest_asyncio.fixture
 async def chat_client():
     """AsyncClient with all external services mocked."""
@@ -115,15 +129,20 @@ async def chat_client():
         patch("app.chatbot.router.append_turn", new_callable=AsyncMock) as mock_append,
     ):
         from app.chatbot.models import ChatSession
-        mock_get_session.return_value = ChatSession()
+        from app.auth.config import current_active_user
+        from app.main import app
+
+        mock_user = _make_mock_user()
+        app.dependency_overrides[current_active_user] = lambda: mock_user
+        mock_get_session.return_value = ChatSession(user_id=str(mock_user.id))
         mock_append.return_value = None
 
-        from app.main import app
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             # Expose mocks so tests can inspect calls
             c.mock_append = mock_append
             c.mock_get_session = mock_get_session
             yield c
+        app.dependency_overrides.clear()
 
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
@@ -248,7 +267,7 @@ async def test_refs_line_filters_citations(chat_client):
     """REFS:[1] in LLM response → only first doc returned as citation."""
     from app.chatbot.models import ChatSession
     session_id = "test-refs-filter-1"
-    mock_session = ChatSession(session_id=session_id)
+    mock_session = ChatSession(session_id=session_id, user_id="test-user-id")
 
     refs_agent = _make_refs_agent_with_docs(
         ["النفقة على الزوجة صدقة [1].\nREFS:[1]"]
@@ -278,7 +297,7 @@ async def test_refs_line_filters_multiple_citations(chat_client):
     """REFS:[1,3] → only docs 1 and 3 returned; doc 2 excluded."""
     from app.chatbot.models import ChatSession
     session_id = "test-refs-filter-multi"
-    mock_session = ChatSession(session_id=session_id)
+    mock_session = ChatSession(session_id=session_id, user_id="test-user-id")
 
     refs_agent = _make_refs_agent_with_docs(
         ["الجواب من [1] و[3].\nREFS:[1,3]"]
@@ -309,7 +328,7 @@ async def test_no_refs_line_falls_back_to_all_docs(chat_client):
     """When LLM omits REFS line, all retrieved docs are returned as citations (fallback)."""
     from app.chatbot.models import ChatSession
     session_id = "test-refs-fallback"
-    mock_session = ChatSession(session_id=session_id)
+    mock_session = ChatSession(session_id=session_id, user_id="test-user-id")
 
     refs_agent = _make_refs_agent_with_docs(["إجابة بدون مراجع."])
 
@@ -332,7 +351,7 @@ async def test_refs_empty_returns_no_citations(chat_client):
     """REFS:[] means the LLM explicitly cited nothing → empty citations list."""
     from app.chatbot.models import ChatSession
     session_id = "test-refs-empty"
-    mock_session = ChatSession(session_id=session_id)
+    mock_session = ChatSession(session_id=session_id, user_id="test-user-id")
 
     refs_agent = _make_refs_agent_with_docs(["لا توجد أحاديث مناسبة.\nREFS:[]"])
 
