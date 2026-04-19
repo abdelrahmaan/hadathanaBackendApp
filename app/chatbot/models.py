@@ -31,5 +31,14 @@ class SessionMessage(BaseModel):
 
 class ChatSession(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str                           # UUID string from auth User.id
+    title: str = ""                        # populated by thread_rename event
     created_at: datetime = Field(default_factory=datetime.utcnow)
     messages: list[SessionMessage] = []
+
+
+class ChatSessionMeta(BaseModel):
+    session_id: str
+    title: str
+    created_at: datetime
+    message_count: int

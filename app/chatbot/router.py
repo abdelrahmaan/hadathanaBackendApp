@@ -2,14 +2,16 @@ import json
 import logging
 import re
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from langchain.chat_models import init_chat_model
 
+from app.auth.config import current_active_user
+from app.auth.models import User
 from app.chatbot.agent import get_agent, get_last_docs
-from app.chatbot.models import ChatRequest, Citation
+from app.chatbot.models import ChatRequest, ChatSession, ChatSessionMeta, Citation
 from app.chatbot.prompts import THREAD_RENAME_PROMPT
-from app.chatbot.session import append_turn, get_or_create_session
+from app.chatbot.session import append_turn, get_or_create_session, update_session_title
 from app.config import settings
 from app.database import get_client, get_db
 
@@ -61,9 +63,9 @@ async def _generate_title(question: str) -> str:
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user: User = Depends(current_active_user)):
     db = get_db(get_client())
-    session = await get_or_create_session(db, request.session_id)
+    session = await get_or_create_session(db, request.session_id, str(user.id))
     agent = get_agent()
 
     logger.info(
@@ -187,7 +189,76 @@ async def chat(request: ChatRequest):
         yield _sse({"type": "thread_rename", "title": title})
         yield _sse({"type": "stream_end"})
 
-        # Persist conversation turn to Mongo after stream is fully sent
+        # Persist conversation turn and title to Mongo after stream is fully sent
         await append_turn(db, session, request.question, full_content, citations)
+        await update_session_title(db, session.session_id, title)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/chat/sessions", response_model=list[ChatSessionMeta])
+async def list_sessions(
+    skip: int = 0,
+    limit: int = 20,
+    user: User = Depends(current_active_user),
+):
+    """List the authenticated user's chat sessions (metadata only, no messages)."""
+    db = get_db(get_client())
+    col = "chat_sessions_dev" if settings.is_dev else "chat_sessions_prod"
+    cursor = (
+        db[col]
+        .find({"user_id": str(user.id)})
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(limit)
+    )
+    results = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        results.append(
+            ChatSessionMeta(
+                session_id=doc["session_id"],
+                title=doc.get("title", ""),
+                created_at=doc["created_at"],
+                message_count=len(doc.get("messages", [])),
+            )
+        )
+    return results
+
+
+@router.get("/chat/sessions/{session_id}", response_model=ChatSession)
+async def get_session(
+    session_id: str,
+    user: User = Depends(current_active_user),
+):
+    """Get a full chat session (with messages) — 403 if not owned by user."""
+    from fastapi import HTTPException
+    db = get_db(get_client())
+    col = "chat_sessions_dev" if settings.is_dev else "chat_sessions_prod"
+    doc = await db[col].find_one({"session_id": session_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    doc.pop("_id", None)
+    session = ChatSession(**doc)
+    if session.user_id != str(user.id):
+        raise HTTPException(status_code=403, detail="Session belongs to another user.")
+    return session
+
+
+@router.delete("/chat/sessions/{session_id}", status_code=204)
+async def delete_session(
+    session_id: str,
+    user: User = Depends(current_active_user),
+):
+    """Delete a chat session — 403 if not owned by user, 404 if not found."""
+    from fastapi import HTTPException
+    db = get_db(get_client())
+    col = "chat_sessions_dev" if settings.is_dev else "chat_sessions_prod"
+    doc = await db[col].find_one({"session_id": session_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    doc.pop("_id", None)
+    session = ChatSession(**doc)
+    if session.user_id != str(user.id):
+        raise HTTPException(status_code=403, detail="Session belongs to another user.")
+    await db[col].delete_one({"session_id": session_id})
