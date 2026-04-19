@@ -20,6 +20,11 @@ from .database import (
     get_db_status,
     validate_connection,
 )
+
+if settings.chatbot_enabled:
+    from .chatbot.agent import build_agent
+    from .chatbot.qdrant import connect_qdrant, disconnect_qdrant
+    from .chatbot.router import router as chatbot_router
 from .logging_config import setup_logging
 from .middleware import RequestLoggingMiddleware
 from .routers import (
@@ -43,7 +48,12 @@ async def lifespan(app: FastAPI):
     logger.info("startup", extra={"event": "startup"})
     await connect()
     await validate_connection()
+    if settings.chatbot_enabled:
+        await connect_qdrant()
+        build_agent()
     yield
+    if settings.chatbot_enabled:
+        await disconnect_qdrant()
     await disconnect()
     logger.info("shutdown", extra={"event": "shutdown"})
 
@@ -97,6 +107,8 @@ app.include_router(narrators_shamela.router)
 app.include_router(hadiths_podia.router)
 app.include_router(narrators_podia.router)
 app.include_router(search_podia.router)
+if settings.chatbot_enabled:
+    app.include_router(chatbot_router)
 app.include_router(bookmarks.router)
 
 Instrumentator().instrument(app).expose(app)
@@ -135,5 +147,7 @@ async def health():
         if db_status.get("empty_collections"):
             result["status"] = "degraded"
             result["warning"] = f"Empty/missing collections: {', '.join(db_status['empty_collections'])}"
+
+    result["chatbot"] = settings.chatbot_enabled
 
     return result

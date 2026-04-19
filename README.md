@@ -17,7 +17,7 @@ FastAPI + MongoDB backend for the Hadathana Islamic hadith platform. Exposes the
 # 1. Copy env template and fill in credentials
 cp .env.example .env
 
-# 2. Start the dev stack (MongoDB + bootstrap + API on port 8001)
+# 2. Start dev stack (MongoDB + bootstrap + API on port 8001)
 make dev
 
 # 3. Verify
@@ -39,24 +39,146 @@ Both dev and prod run on the same VPS using Docker Compose file merging.
 | Database | `HadithDataDev` | `HadithData` |
 | Volume | `hadathana_mongodb_dev` | `hadathana_mongodb_prod` |
 | Code reload | live (`--reload` + volume mount) | baked into image |
-| Start command | `make dev` | `make prod` |
 
 ---
 
-## Docker Compose Commands
+## Commands
+
+### Dev
 
 ```bash
-make dev          # start dev stack (port 8001)
-make prod         # build image + start prod stack (port 8000)
-make dev-logs     # follow dev API logs
-make prod-logs    # follow prod API logs
-make dev-down     # stop dev stack
-make prod-down    # stop prod stack
-make status       # show both stacks
-make health       # health check both APIs
+make dev              # start dev stack (API on :8001)
+make dev-logs         # follow dev API logs
+make dev-down         # stop dev stack
+make dev-ps           # check dev services status
 ```
 
-On first run, `mongo-init` auto-bootstraps the database from JSONL files. Subsequent starts skip bootstrap if data already exists (<1s).
+### Prod
+
+```bash
+make prod             # build image + start prod stack (API on :8000)
+make prod-logs        # follow prod API logs
+make prod-down        # stop prod stack
+make prod-ps          # check prod services status
+make prod-restart     # restart prod API only (no rebuild)
+```
+
+### Both stacks
+
+```bash
+make status           # show running containers for both stacks
+make health           # health check both APIs
+```
+
+### Testing
+
+```bash
+# Unit tests — mocked, no server needed
+make test             # all tests
+make test-chatbot     # chatbot unit tests only
+
+# Smoke tests — require a live stack
+make test-chatbot-dev    # chatbot smoke tests against dev :8001  (requires: make dev)
+make test-chatbot-prod   # chatbot smoke tests against prod :8000 (requires: make prod)
+
+# Data presence tests — verify hadiths/narrators/topics are loaded
+make test-db-dev         # check data in dev :8001  (requires: make dev)
+make test-db-prod        # check data in prod :8000 (requires: make prod)
+```
+
+---
+
+## No Data? Recovery Guide
+
+If the API returns `{"items": [], "total": 7076}` (total > 0 but items empty), or the health endpoint shows degraded collections, the database has corrupted or missing documents.
+
+### Step 1 — Diagnose
+
+```bash
+# Check health
+curl http://localhost:8001/health
+
+# Check if hadiths load
+curl "http://localhost:8001/api/v2/hadiths?limit=1"
+
+# Check API logs for validation errors
+make dev-logs
+```
+
+If you see `Skipping malformed hadith doc` warnings, documents were corrupted (missing required fields). This usually means a partial-field import replaced full documents.
+
+### Step 2 — Restore the collection
+
+```bash
+# Shell into the dev MongoDB container
+docker exec -it hadathana-mongo-dev mongosh HadithDataDev
+
+# Drop the corrupted collection
+db.processed_podia_books.drop()
+exit
+```
+
+### Step 3 — Re-import full hadith data
+
+```bash
+# Import from the full JSONL (must be present in the repo)
+docker exec -i hadathana-mongo-dev mongoimport \
+  --db HadithDataDev --collection processed_podia_books \
+  < mongo_migration/processed_bukhari_podia/bukhari_podia_hadiths.jsonl
+```
+
+If the JSONL is missing, pull it from R2 first:
+```bash
+python scripts/r2_sync/pull_snapshot.py --dataset bukhari_podia --latest
+```
+
+### Step 4 — Re-apply enrichments (topics)
+
+> ⚠️ Never use `mongoimport --mode=upsert` or `--mode=merge` to apply partial field updates — it replaces entire documents. Always use PyMongo `$set`.
+
+```bash
+# Apply topics (merges topics field, preserves all hadith data)
+/home/abdo_kamar/Projects/.venv/bin/python - <<'EOF'
+import json
+from pymongo import MongoClient, UpdateOne
+
+client = MongoClient("mongodb://localhost:27017/")
+col = client["HadithDataDev"]["processed_podia_books"]
+ops = [
+    UpdateOne({"hadith_url": json.loads(l)["hadith_url"]}, {"$set": {"topics": json.loads(l)["topics"]}})
+    for l in open("hadith_topics.jsonl")
+]
+result = col.bulk_write(ops, ordered=False)
+print(f"matched: {result.matched_count}, modified: {result.modified_count}")
+EOF
+```
+
+### Step 5 — Rebuild indexes
+
+```bash
+/home/abdo_kamar/Projects/.venv/bin/python mongo_migration/create_indexes.py
+```
+
+### Step 6 — Verify
+
+```bash
+curl http://localhost:8001/health
+curl "http://localhost:8001/api/v2/hadiths?limit=2"
+curl http://localhost:8001/api/v2/topics
+```
+
+### Alternative: full auto-bootstrap
+
+If you want to wipe and fully restart from scratch:
+
+```bash
+# Stop stack and destroy dev volume (WARNING: deletes all dev data)
+make dev-down
+docker volume rm hadathana_mongodb_dev
+
+# Restart — mongo-init will auto-bootstrap from JSONL files
+make dev
+```
 
 ### Services and Ports
 
@@ -72,8 +194,6 @@ On first run, `mongo-init` auto-bootstraps the database from JSONL files. Subseq
 
 ## Feature Development Workflow
 
-All development happens on the VPS. Dev (`:8001`) is your staging — prod (`:8000`) is only touched on promotion.
-
 ```
 feat branch  →  dev :8001  →  validate  →  merge main  →  make prod :8000
 ```
@@ -82,32 +202,40 @@ feat branch  →  dev :8001  →  validate  →  merge main  →  make prod :800
 
 ```bash
 git checkout main
-git checkout -b feat_your_feature
+git checkout -b feat/your-feature
 ```
 
-### 2. Develop and test on dev
+### 2. Develop on dev (live reload)
 
 ```bash
-make dev          # already running? skip this
+make dev      # already running? skip this
 # edit code in app/ — live reload picks up changes instantly
-# test at http://<vps-ip>:8001
+# test at http://localhost:8001/docs
 ```
 
-### 3. Merge to main and promote to prod
+### 3. Run tests
+
+```bash
+make test
+make test-chatbot-dev   # chatbot smoke tests against live dev stack
+make test-db-dev        # data presence tests — verify hadiths/narrators/topics loaded
+```
+
+### 4. Merge to main and promote to prod
 
 ```bash
 git checkout main
-git merge feat_your_feature
-make prod         # rebuilds image from main, restarts prod on :8000
+git merge feat/your-feature
+make prod     # rebuilds image from main, restarts prod on :8000
 ```
 
-Prod rebuild takes ~20-30 seconds. Users see no downtime during the build; the old container keeps serving until the new one is ready.
+Prod rebuild takes ~20–30 seconds. The old container keeps serving until the new one is ready.
 
-### 4. Rollback if something breaks
+### 5. Rollback if something breaks
 
 ```bash
 git checkout <last-good-commit>
-make prod         # rebuilds from rolled-back code
+make prod
 ```
 
 ---
@@ -196,7 +324,7 @@ PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 # Bootstrap HadithData (prod DB)
 "$PYTHON" scripts/bootstrap_local_db.py --db HadithData
 
-# Force re-import
+# Force full re-import even if data exists
 "$PYTHON" scripts/bootstrap_local_db.py --force
 ```
 
@@ -335,8 +463,48 @@ Require valid session cookie. Returns `401` if not logged in.
 | GET | `/api/v2/narrators/{rawi_id}/stats` | — | `PodiaNarratorStats` |
 | GET | `/api/v2/topics` | — | `TopicsResponse` |
 | GET | `/api/v2/topics/{topic}/hadiths` | `skip`, `limit` | `PaginatedPodiaHadiths` |
-| POST | `/api/v2/chat` | body: `{ "question", "session_id?" }` | SSE stream (see Al-Rawi section) |
-| GET | `/health` | — | `{ "status": "ok", "chatbot": true }` |
+| POST | `/api/v2/chat` | body: `{ "question", "session_id?" }` | SSE stream |
+| GET | `/health` | — | `{ "status": "ok", "chatbot": true/false }` |
+
+### Chatbot feature flag
+
+Set `CHATBOT_ENABLED=false` in `.env` to disable all chatbot routes and skip Qdrant on startup. The `/health` endpoint exposes `"chatbot": true/false` so the frontend can show/hide the chat icon accordingly.
+
+To toggle without a full rebuild:
+
+```bash
+# Edit .env: CHATBOT_ENABLED=false
+
+# Dev (already running)
+docker restart hadathana-api-dev
+
+# Prod (already running)
+make prod-restart
+```
+
+### Chatbot — POST /api/v2/chat
+
+```bash
+# New session (server generates session_id):
+curl -X POST http://localhost:8001/api/v2/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"ما حكم النية في الصلاة؟"}' --no-buffer
+
+# Resume session (pass session_id from first assistant_message_start event):
+curl -X POST http://localhost:8001/api/v2/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"question":"وضح أكثر","session_id":"<uuid>"}' --no-buffer
+```
+
+Response is `text/event-stream` (SSE). Event types:
+
+| Event | Description |
+|---|---|
+| `assistant_message_start` | Stream begins; includes `session_id` for new sessions |
+| `content` | Token chunk |
+| `assistant_message_complete` | Full text + `citations[]` (only cited hadiths, filtered by REFS line) |
+| `thread_rename` | Suggested Arabic conversation title |
+| `stream_end` | Stream closed |
 
 ---
 
@@ -344,7 +512,7 @@ Require valid session cookie. Returns `401` if not logged in.
 
 ```bash
 # Health
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 
 # Auth
 curl -X POST http://localhost:8000/auth/register \
@@ -362,10 +530,10 @@ curl -b cookies.txt -X POST http://localhost:8000/api/v2/bookmarks \
 curl -b cookies.txt -X DELETE "http://localhost:8000/api/v2/bookmarks/https%3A%2F%2Fhadathana.app%2Fhadith%2F1"
 
 # v1 — Shamela
-curl http://localhost:8000/api/v1/hadiths
-curl "http://localhost:8000/api/v1/hadiths?hadith_plain=نام"
-curl "http://localhost:8000/api/v1/hadiths?narrator_id=822"
-curl http://localhost:8000/api/v1/narrators/822/stats
+curl http://localhost:8001/api/v1/hadiths
+curl "http://localhost:8001/api/v1/hadiths?hadith_plain=نام"
+curl "http://localhost:8001/api/v1/hadiths?narrator_id=822"
+curl http://localhost:8001/api/v1/narrators/822/stats
 
 # v2 — Podia
 curl http://localhost:8000/api/v2/hadiths
@@ -382,25 +550,20 @@ curl -s -X POST http://localhost:8000/api/v2/chat \
   -d '{"question": "ما حكم الصلاة في وقتها؟"}' --no-buffer
 ```
 
-# Continue a session
-curl -s -X POST http://localhost:8000/api/v2/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question": "هل هناك أحاديث أخرى؟", "session_id": "<id from first response>"}' --no-buffer
-```
+### Arabic Search Normalization
 
-Search is normalization-tolerant — these all return the same results:
+Search is normalization-tolerant — variant spellings match automatically:
+
+
 ```bash
 # taa marbuta: الصلاه = الصلاة
-curl "http://localhost:8000/api/v2/hadiths?hadith_text_plain=الصلاه"
-curl "http://localhost:8000/api/v2/hadiths?hadith_text_plain=الصلاة"
+curl "http://localhost:8001/api/v2/hadiths?hadith_text_plain=الصلاه"
 
 # hamza: ابراهيم = إبراهيم
-curl "http://localhost:8000/api/v1/narrators?name_plain=ابراهيم"
-curl "http://localhost:8000/api/v1/narrators?name_plain=إبراهيم"
+curl "http://localhost:8001/api/v1/narrators?name_plain=ابراهيم"
 
 # alef maqsura: موسي = موسى
-curl "http://localhost:8000/api/v2/narrators?full_name_plain=موسي"
-curl "http://localhost:8000/api/v2/narrators?full_name_plain=موسى"
+curl "http://localhost:8001/api/v2/narrators?full_name_plain=موسي"
 ```
 
 ---
@@ -414,11 +577,10 @@ curl "http://localhost:8000/api/v2/narrators?full_name_plain=موسى"
 | `hadith_index` / `hadith_indices` | ✅ single int | ✅ list | Podia hadiths can span multiple indices |
 | `hadith` / `hadith_text` | ✅ | ✅ | Full text with tashkeel |
 | `hadith_plain` / `hadith_text_plain` | ✅ | ✅ | Tashkeel stripped |
-| `hadith_search` / `hadith_text_search` | ✅ | ✅ | Fully normalized for search (see below) |
-| `sanad_text_search`, `matn_text_search` | ❌ | ✅ | Normalized sanad/matn search fields |
+| `hadith_search` / `hadith_text_search` | ✅ | ✅ | Fully normalized for search |
+| `sanad_text`, `matn_text`, `tawabi_text` | ❌ | ✅ | Segmented text |
 | `book`, `chapter` | ❌ | ✅ | |
 | `hadith_url` | ❌ | ✅ | Source URL |
-| `sanad_text`, `matn_text`, `tawabi_text` | ❌ | ✅ | Segmented text |
 | `topics[]` | ❌ | ✅ | Arabic semantic topic tags (LLM-generated) |
 | `matn_embedding` | ❌ | ✅ | 1536-dim Cohere vector (for semantic search) |
 | `chains[]` | ✅ | ✅ | Multi-chain with transmission types |
@@ -429,89 +591,11 @@ curl "http://localhost:8000/api/v2/narrators?full_name_plain=موسى"
 | Field | v1 Shamela | v2 Podia |
 |-------|:---:|:---:|
 | `name` / `name_in_chain` | ✅ | ✅ |
-| `name_search` / `name_in_chain_search` | ✅ | ✅ |
 | `full_name`, `full_name_plain` | ❌ | ✅ |
-| `full_name_search` | ❌ | ✅ |
 | `kunya`, `nasab`, `tabaqa` | ✅ | ❌ |
-| `kunya_search`, `nasab_search` | ✅ | ❌ |
 | `rank`, `rank_plain` | ❌ | ✅ |
 | `rank_ibn_hajar`, `rank_dhahabi` | ✅ | ❌ |
 | `jarh_wa_tadil[]` | ✅ | via `/tarajem` |
-
-### Arabic Search Normalization
-
-All text search parameters are normalized before querying, and all `_search` fields in MongoDB are pre-normalized to the same form. This means variant spellings match automatically:
-
-| Variant typed | Matches data containing |
-|---|---|
-| `الصلاه` | `الصلاة` (taa marbuta ة → ه) |
-| `موسي` | `موسى` (alef maqsura ى → ي) |
-| `ابراهيم` | `إبراهيم` (hamza variants أ/إ/آ → ا) |
-| `ابوهريره` | `أبو هريرة` (hamza + taa marbuta combined) |
-
-Normalization applied: strip tashkeel, unify hamza variants (أ/إ/آ → ا, ؤ → و, ئ → ي), ة → ه, ى → ي, remove tatweel. Implemented in `app/normalization.py`.
-
----
-
-## Matn Embeddings & Topics
-
-All 7,076 Podia hadiths are enriched with:
-- **`matn_embedding`** — 1536-dim Cohere `embed-v4.0` vector (for semantic search / RAG)
-- **`topics`** — 1–3 Arabic semantic tags generated by Gemini Flash via OpenRouter
-
-### JSONL-first enrichment (preferred — no MongoDB dependency)
-
-Two offline scripts write slim output files to the repo root, then import into MongoDB separately:
-
-```bash
-# Run in tmux enrichment session (topics first, then embeddings automatically)
-tmux new-session -d -s enrichment
-tmux send-keys -t enrichment 'cd ~/Projects/hadathanaBackendApp && \
-  /home/abdo_kamar/Projects/.venv/bin/python scripts/tag_topics_jsonl.py && \
-  /home/abdo_kamar/Projects/.venv/bin/python scripts/embed_matn_jsonl.py' Enter
-
-# Smoke test (5 docs each)
-python scripts/tag_topics_jsonl.py --limit 5
-python scripts/embed_matn_jsonl.py --limit 5
-
-# Dry run (estimate API calls)
-python scripts/tag_topics_jsonl.py --dry-run
-python scripts/embed_matn_jsonl.py --dry-run
-```
-
-Output files (repo root, gitignored):
-- `hadith_topics.jsonl` — `hadith_url` + `topics` → import to MongoDB
-- `hadith_embeddings.jsonl` — `hadith_url` + `matn_embedding` → Qdrant / vector DB (deferred)
-
-Both scripts are **resumable** — re-running skips already-processed `hadith_url`s.
-
-Import topics into MongoDB after the script completes (use the `$set` script — **do not** use `mongoimport --mode=upsert` as it replaces entire documents):
-```bash
-# Apply topics as $set updates (merges topics field, preserves all other hadith data)
-python scripts/apply_topics.py --db HadithDataDev
-```
-
-Or run inline:
-```python
-# scripts/apply_topics.py equivalent — inline version
-import json
-from pymongo import MongoClient, UpdateOne
-col = MongoClient("mongodb://localhost:27017/")["HadithDataDev"]["processed_podia_books"]
-ops = [UpdateOne({"hadith_url": d["hadith_url"]}, {"$set": {"topics": d.get("topics", [])}})
-       for d in (json.loads(l) for l in open("hadith_topics.jsonl"))]
-result = col.bulk_write(ops, ordered=False)
-print(f"Modified: {result.modified_count}")
-```
-
-Requires `COHERE_API_KEY` and `OPENROUTER_API_KEY` in `.env`.
-
-### Legacy (Atlas-dependent)
-
-```bash
-python scripts/embed_matn.py              # full run — requires Atlas write access
-python scripts/embed_matn.py --dry-run    # estimate cost only
-python scripts/embed_matn.py --limit 5    # smoke test on 5 docs
-```
 
 ---
 
@@ -535,9 +619,12 @@ DB_NAME_DEV=HadithDataDev
 CORS_ORIGINS=https://hadathana.app,https://www.hadathana.app
 CORS_ORIGINS_DEV=http://localhost:3000,http://localhost:5173
 
-# Embeddings & topic tagging
+# Chatbot
+CHATBOT_ENABLED=true                 # set to false to disable chatbot routes + Qdrant entirely
 COHERE_API_KEY=
 OPENROUTER_API_KEY=
+QDRANT_URL=http://qdrant:6333
+CHATBOT_MODEL=qwen/qwen3-235b-a22b
 
 # Cloudflare R2 (data snapshots)
 R2_ENDPOINT_URL=
@@ -550,13 +637,13 @@ R2_SECRET_ACCESS_KEY=
 
 ## Data Snapshots (Cloudflare R2)
 
-All JSONL data files are stored in R2, not git. **Always check R2 for the latest snapshot before starting any data work.**
+All JSONL data files are stored in R2, not git. Pull before any data work.
 
 ```bash
-# See what snapshots exist
+# See available snapshots
 python scripts/r2_sync/list_snapshots.py
 
-# Pull latest snapshot after cloning or before data work
+# Pull latest snapshot
 python scripts/r2_sync/pull_snapshot.py --dataset bukhari_podia --latest
 python scripts/r2_sync/pull_snapshot.py --dataset bukhari_shamela --latest
 ```
@@ -567,46 +654,35 @@ Full docs: [scripts/r2_sync/README.md](scripts/r2_sync/README.md)
 
 ## Data Update Workflow
 
-When enriching or modifying data (e.g. adding topics, embeddings, new fields):
+When enriching or modifying data (adding topics, embeddings, new fields):
 
-**1. Write/update the script**
-- New enrichment → new file under `scripts/` (e.g. `scripts/embed_matn.py`)
-- Schema change → update the relevant preprocessing script and `app/models/`
-
-**2. Pull latest data from R2**
+**1. Pull latest data from R2**
 ```bash
 python scripts/r2_sync/pull_snapshot.py --dataset bukhari_podia --latest
 ```
 
-**3. Run the script against `HadithDataDev` first**
+**2. Run against dev first**
 ```bash
-# Make sure APP_ENV=dev in .env (points to local Docker + HadithDataDev)
+# Ensure APP_ENV=dev in .env
 python scripts/your_script.py
 ```
 
-**4. Verify in dev, test the API**
+**3. Verify in dev**
 ```bash
-# Confirm data looks right
 curl "http://localhost:8001/api/v2/hadiths?limit=3"
-# Run tests
-python -m pytest tests/ -v
+make test-chatbot-dev
 ```
 
-**5. Push enriched JSONL to R2**
+**4. Push enriched JSONL to R2**
 ```bash
 python scripts/r2_sync/push_snapshot.py --dataset bukhari_podia \
   --source mongo_migration/processed_bukhari_podia/ --extensions jsonl
 ```
 
-**6. Promote to prod**
+**5. Promote to prod**
 ```bash
-# mongodump from dev, mongorestore to prod
 docker exec hadathana-mongo-dev mongodump --db HadithDataDev --out /tmp/dump
 docker exec hadathana-mongo-prod mongorestore --db HadithData /tmp/dump/HadithDataDev
-```
-
-**7. Restart prod API**
-```bash
 make prod-restart
 ```
 

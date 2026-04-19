@@ -10,7 +10,8 @@
 services:
   mongo:
     container_name: hadathana-mongo-prod
-    # No ports: MongoDB is internal-only in production
+    ports:
+      - "27018:27017"  # Compass: mongodb://localhost:27018 → HadithData
 
   mongo-init:
     container_name: hadathana-init-prod
@@ -18,6 +19,18 @@ services:
       python scripts/bootstrap_local_db.py
       --db HadithData
       --uri mongodb://mongo:27017/
+
+  qdrant:
+    container_name: hadathana-qdrant-prod
+    # No ports — Qdrant is internal-only in production
+
+  qdrant-init:
+    container_name: hadathana-qdrant-init-prod
+    command: >
+      python scripts/sync_qdrant.py
+      --uri mongodb://mongo:27017/
+      --db HadithData
+      --qdrant-url http://qdrant:6333
 
   api:
     container_name: hadathana-api-prod
@@ -28,6 +41,7 @@ services:
       - MONGODB_URI_LOCAL=mongodb://mongo:27017/
       - DB_NAME=HadithData
       - CORS_ORIGINS=https://hadathana.app,https://www.hadathana.app,http://localhost:3000
+      - QDRANT_URL=http://qdrant:6333
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
     # No volume mounts — code is baked into the Docker image
 
@@ -50,3 +64,5 @@ volumes:
     name: hadathana_prometheus_prod
   grafana_data:
     name: hadathana_grafana_prod
+  qdrant_data:
+    name: hadathana_qdrant_prod

@@ -209,6 +209,7 @@
 - [ ] Mobile optimization
 
 ### Testing & CI/CD
+- [x] Data presence smoke tests — `tests/test_data_presence.py` covering Shamela hadiths/narrators, Podia hadiths/narrators, topics, stats, pagination, 404s, and health collections. Run with `APP_ENV=dev pytest tests/test_data_presence.py -v`.
 - [x] Unit tests for API endpoints (pytest + httpx)
 - [ ] Integration tests with MongoDB test database
 - [x] CI/CD pipeline (GitHub Actions): run tests + linting on every PR, block merge to `main` if checks fail — `.github/workflows/ci.yml` (lint job: ruff; test job: pytest)
@@ -230,6 +231,123 @@
 - [ ] Langfuse LLM observability (Phase 4)
 - [ ] Alerting (Phase 6)
 - [x] Logging infrastructure
+
+---
+
+---
+
+## v1.5 - Smart Chatbot
+
+### V1 — Matn Q&A (in_progress)
+- [x] Qdrant hybrid search infra (dense Cohere embed-multilingual-v3.0 + BM25 sparse via FastEmbedSparse)
+- [x] Cohere rerank-multilingual-v3.0 as contextual compression layer
+- [x] LangChain `create_tool_calling_agent` + `AgentExecutor` with `@tool search_hadiths`
+- [x] OpenRouter LLM (model configurable via `CHATBOT_MODEL` env var)
+- [x] `POST /api/v2/chat` SSE endpoint — exact event format with `assistant_message_start`, `content`, `assistant_message_complete` (with citations), `thread_rename`, `stream_end`
+- [x] Authenticated session management: `POST /api/v2/chat` requires auth, persists `user_id` ownership, stores history in `chat_sessions`, and exposes `GET/DELETE /api/v2/chat/sessions...`
+- [x] `scripts/sync_qdrant.py` — CLI to populate Qdrant from Mongo (idempotent)
+- [x] `qdrant` + `qdrant-init` Docker Compose services added to dev + prod stacks
+- [x] FastEmbed BM25 model pre-baked into Docker image
+- [x] CORS updated to allow POST
+- [x] 4 unit tests in `tests/test_chatbot_v1.py`
+- [x] Dedicated session API tests in `tests/test_chatbot_sessions.py` covering auth, ownership, list/get/delete, and delete-then-404 flow
+- [ ] Manual eval: test 10+ Arabic questions, tune system prompt
+- [ ] Promote to prod after eval passes
+
+### feat: complete chatbot user sessions spec (2026-04-18)
+**Status**: done
+**Summary**: Linked chatbot sessions to authenticated users. `ChatSession` gains `user_id` + `title` fields. `POST /api/v2/chat` now requires auth and enforces session ownership (403 on mismatch). Title is persisted after `thread_rename` event. Added `GET /api/v2/chat/sessions`, `GET /api/v2/chat/sessions/{id}`, `DELETE /api/v2/chat/sessions/{id}` endpoints. MongoDB indexes added for both session collections. 9 new tests cover auth gate, ownership, list, detail, and delete flows.
+**Touched files**:
+- `app/chatbot/models.py` — added `user_id`, `title` to `ChatSession`; added `ChatSessionMeta`
+- `app/chatbot/session.py` — `get_or_create_session` now takes `user_id` + ownership check; new `update_session_title`
+- `app/chatbot/router.py` — auth gate on `POST /chat`; title persistence; 3 new session endpoints
+- `mongo_migration/create_indexes.py` — `user_id+created_at` and `session_id` unique indexes for both session collections
+- `tests/test_chatbot_sessions.py` — 9 tests covering all session flows
+
+### V2 — Narrator biographies (pending)
+- [ ] `scripts/embed_narrators.py` — Cohere embeddings for narrator bios
+- [ ] Second Qdrant collection `narrators_bio` (1,780 points)
+- [ ] Add `search_narrators` + `hadiths_by_narrator` tools to agent
+- [ ] Updated dual-source system prompt
+
+### V3 — Graph queries (pending)
+- [ ] Neo4j as Docker Compose service
+- [ ] `app/chatbot/graph.py` — parametrized Cypher helpers (no free-form LLM Cypher)
+- [ ] 3 graph tools: `narrator_chain_between`, `narrator_students`, `common_narrators_between_hadiths`
+- [ ] Upgrade to Claude Sonnet 4.6 via OpenRouter for tool-use orchestration
+
+### Touched files (V1 enhancements — greeting guard, memory, citation fix)
+- `app/chatbot/prompts.py` — Rule 0: greetings bypass tool call
+- `app/chatbot/agent.py` — `InMemorySaver` checkpointer; `_last_docs` dict to stash tool docs; `config: RunnableConfig` param on `search_hadiths` to extract `thread_id`; `get_last_docs()` helper
+- `app/chatbot/router.py` — `config={"configurable": {"thread_id": session.session_id}}` passed to `astream`; replaced post-stream retriever re-invoke with `get_last_docs()`
+- `app/chatbot/CHATBOT.md` — updated agent flow diagram, pipeline logging table, design decisions
+
+### Touched files (V1)
+- `requirements.txt` — added langchain, langchain-qdrant, langchain-community, qdrant-client, fastembed
+- `app/config.py` — added cohere_api_key, openrouter_api_key, qdrant_url, chatbot_model
+- `app/database.py` — added chat_sessions to EXPECTED_COLLECTIONS, get_chat_sessions_collection()
+- `app/main.py` — wired chatbot lifespan hooks + router, fixed CORS to allow POST
+- `app/chatbot/` — new package: __init__, config, models, prompts (English), qdrant, indexer, retriever, agent, session, router
+  - `session.py` writes to `chat_sessions_dev` (dev) or `chat_sessions_prod` (prod) based on `APP_ENV`
+  - `prompts.py` written in English per convention
+  - No `load_dotenv` needed — pydantic-settings reads `.env` automatically via `model_config`
+- `scripts/sync_qdrant.py` — new CLI sync script
+- `docker-compose.yml` — added qdrant + qdrant-init services, qdrant_data volume
+- `docker-compose.override.yml` — dev config: qdrant port 6333 exposed, qdrant-init command, QDRANT_URL env
+- `docker-compose.prod.yml` — prod config: qdrant internal-only, qdrant-init command, QDRANT_URL env
+- `Dockerfile` — added scripts/ copy + fastembed model pre-download
+- `tests/test_chatbot_v1.py` — 4 tests (session_id, SSE schema, Mongo save, refusal)
+- `.env.example` — added QDRANT_URL, CHATBOT_MODEL
+- `CLAUDE.md` — updated architecture + data workflow
+- `README.md` — added chatbot endpoint docs
+
+---
+
+## Chatbot & AI Enhancements
+
+> Improvements identified from live testing and pipeline analysis. Ordered by impact/effort ratio.
+
+### High Impact — Low Effort
+
+- [x] **Fix double retrieval** — tool stashes docs in `_last_docs[thread_id]`; router uses `get_last_docs()` after stream. Saves ~500ms, citation scores now use LLM-refined query (higher).
+  - Files: `app/chatbot/router.py`, `app/chatbot/agent.py`
+
+- [x] **Stateful multi-turn memory** — `InMemorySaver` checkpointer added to `create_agent`; `thread_id = session.session_id` passed in every `astream` call. Agent now remembers conversation history within a session.
+  - Files: `app/chatbot/agent.py`, `app/chatbot/router.py`
+
+- [x] **Greeting guard (Rule 0)** — added Rule 0 to system prompt: greetings and small-talk bypass `search_hadiths` entirely. LLM responds naturally with no citations.
+  - Files: `app/chatbot/prompts.py`
+
+- [x] **Citation filtering (REFS line)** — LLM appends `REFS:[1,3]` at end of response. Router strips it before emitting content events and filters `citation_docs` to only those indices. Fallback: if no REFS line, all docs shown; if `REFS:[]`, zero citations. Also fixed `resource_id` (was always `""`) by adding `_id` to Qdrant payload in `indexer.py`. Qdrant re-sync required for `resource_id` to populate on existing data.
+  - Files: `app/chatbot/prompts.py`, `app/chatbot/router.py`, `app/chatbot/indexer.py`, `tests/test_chatbot_v1.py`
+
+- [x] **Relevance score filtering** — Pre-filter retrieved docs below `RELEVANCE_SCORE_THRESHOLD` (0.3) before passing to LLM. Include reranker scores in tool output so LLM can judge borderline passages. Updated prompt Rules 2 and 4 to instruct score-aware citation behavior.
+  - Files: `app/chatbot/config.py`, `app/chatbot/agent.py`, `app/chatbot/prompts.py`
+
+- [ ] **Guardrail middleware** — wrap `create_agent` with `ToolCallLimitMiddleware(max_tool_calls=3)` to prevent runaway tool loops on ambiguous questions.
+  - Files: `app/chatbot/agent.py`
+
+### Medium Impact — Medium Effort
+
+- [ ] **Explicit query rewriting** — add a lightweight pre-step that rewrites the user question into a clean Arabic search query before hitting Qdrant. The agent already does this implicitly (seen in logs), but making it explicit improves consistency for low-score cases (e.g. "ما فضل قراءة القرآن؟" scored 0.19).
+  - Files: `app/chatbot/agent.py` or new `app/chatbot/rewriter.py`
+
+- [ ] **`search_narrators` tool (V2)** — second Qdrant collection `narrators_bio` for narrator biographies (`processed_podia_narrator_biographies`, 1,780 docs). Agent picks the right tool based on question type (hadith content vs. narrator info).
+  - Files: `app/chatbot/agent.py`, `app/chatbot/retriever.py`, `scripts/embed_narrators.py` (new)
+
+- [ ] **Swap `InMemorySaver` → Redis for prod** — current in-memory state is lost on API restart. Redis checkpoint persists across deploys with identical interface.
+  - Files: `app/chatbot/agent.py`, `docker-compose.prod.yml`, `requirements.txt`
+
+### Lower Priority
+
+- [ ] **Graph tools (V3)** — Neo4j Cypher helpers exposed as agent tools: `narrator_chain_between`, `narrator_students`, `common_narrators_between_hadiths`. LLM never writes raw Cypher — all queries are parametrized Python functions.
+  - Files: `app/chatbot/graph.py` (new), `app/chatbot/agent.py`
+
+- [ ] **Manual eval suite** — test 20+ Arabic questions covering: direct matn lookup, narrator questions, topic questions, off-topic (should refuse), multi-turn follow-up. Document reranker scores per question type.
+  - Files: `tests/eval_chatbot.md` (new)
+
+- [ ] **Confidence score display** — reranker `confidence` (0.0–1.0) is already in every citation object. Frontend should display it as a relevance indicator (high/medium/low) on citation cards.
+  - Frontend only — no backend change needed.
 
 ---
 
@@ -302,6 +420,46 @@
 **Touched files**:
 - `README.md` (added Services and Ports table, CI/CD section, Monitoring section)
 - `CLAUDE.md` (updated environment allocation table, added CI/CD and Monitoring sections under Common Commands)
+- `tasks.md`
+
+### chore: apply hadith titles to HadithDataDev (2026-04-11)
+**Status**: done
+**Summary**: Applied `hadith_titles.jsonl` (7,075 entries) to `processed_podia_books` via PyMongo `bulk_write($set)`. Each document now has a `title` field (short Arabic headline ≤150 chars). Also added `hadith_titles.jsonl` to the `ENRICHMENTS` list in `bootstrap_local_db.py` so future bootstrap runs apply titles automatically.
+**Touched files**:
+- `scripts/bootstrap_local_db.py` (added titles to ENRICHMENTS)
+- `tasks.md`
+
+### chore: README overhaul + data recovery guide (2026-04-10)
+**Status**: done
+**Summary**: Rewrote README with clearer structure. Added explicit dev/prod command sections (`make dev`, `make prod`, etc.), a "No Data? Recovery Guide" section covering how to diagnose + fix corrupted/missing collections (drop → re-import JSONL → apply enrichments via `$set` → rebuild indexes). Fixed the topics import incident — `mongoimport --mode=merge` replaced full hadith documents with slim `{hadith_url, topics}` records (7075 docs corrupted). Fixed by dropping collection, re-importing full JSONL, then applying topics via PyMongo `bulk_write($set)`. Added warning to CLAUDE.md prohibiting `mongoimport --mode=upsert/merge` for partial field updates.
+**Touched files**:
+- `README.md`
+- `CLAUDE.md`
+- `tasks.md`
+
+### chore: import topics into HadithDataDev (2026-04-10)
+**Status**: done
+**Summary**: Topics were missing from `HadithDataDev` — `/api/v2/topics` returned empty results. First attempt used `mongoimport --mode=merge` which corrupted 7075 documents (replaced them with slim `{hadith_url, topics}` records). Recovery: dropped collection, re-imported from `bukhari_podia_hadiths.jsonl`, then applied topics via PyMongo `bulk_write($set)` which safely merges a single field without touching other data. Result: 7076 hadiths fully restored + 7075 with topics.
+**Touched files**:
+- `tasks.md`
+
+### chore: chatbot smoke tests + Makefile test commands (2026-04-10)
+**Status**: done
+**Summary**: Added `tests/test_chatbot_smoke.py` — 6 integration tests that hit a live running API (dev `:8001` or prod `:8000`). Tests cover: health check, SSE event sequence, new session ID, multi-turn session, citation filtering (REFS line), REFS line not leaking into content, and greeting bypass. Added `make test-chatbot` (unit), `make test-chatbot-dev` (smoke vs dev), `make test-chatbot-prod` (smoke vs prod) to Makefile. Updated README with test commands section.
+**Touched files**:
+- `tests/test_chatbot_smoke.py` (new)
+- `Makefile` (added test targets)
+- `README.md` (added Testing section, updated data workflow)
+- `tasks.md`
+
+### feat: hadith title tagging script + citation enrichment (2026-04-08)
+**Status**: done
+**Summary**: Added `scripts/tag_titles_jsonl.py` — mirrors the topics script pattern, generates a short Arabic headline (≤150 chars) per hadith using Gemini Flash via OpenRouter. Resumable, JSONL-first, no MongoDB dependency. Updated Qdrant indexer to include `title` in the metadata payload, and enriched the `Citation` model with `title` and `hadith_url` fields so the frontend can display a proper headline and deep-link to the source.
+**Touched files**:
+- `scripts/tag_titles_jsonl.py` (new)
+- `app/chatbot/indexer.py` (added `title` to `_PROJECTION` and metadata payload)
+- `app/chatbot/models.py` (added `title: str = ""` and `hadith_url: str = ""` to `Citation`)
+- `app/chatbot/router.py` (populate `title` and `hadith_url` when building citations)
 - `tasks.md`
 
 ### feat: Grafana dashboards — Phase 2 monitoring (2026-04-06)
