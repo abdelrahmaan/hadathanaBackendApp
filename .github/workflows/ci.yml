@@ -57,3 +57,4 @@ jobs:
           COHERE_API_KEY: stub-for-ci
           OPENROUTER_API_KEY: stub-for-ci
           QDRANT_URL: http://localhost:6333
+          CHATBOT_ENABLED: "true"
