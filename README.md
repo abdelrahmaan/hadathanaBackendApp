@@ -221,18 +221,18 @@ make test-chatbot-dev   # chatbot smoke tests against live dev stack
 make test-db-dev        # data presence tests — verify hadiths/narrators/topics loaded
 ```
 
-### 4. Merge to main and promote to prod
+### 4. Open a PR and merge
 
-```bash
-git checkout main
-git merge feat/your-feature
-make prod     # rebuilds image from main, restarts prod on :8000
-```
-
-Prod rebuild takes ~20–30 seconds. The old container keeps serving until the new one is ready.
+Push your branch and open a PR to `main` on GitHub. CI runs automatically (lint + tests). Once it passes, merge — the CD pipeline deploys to prod automatically via SSH.
 
 ### 5. Rollback if something breaks
 
+```bash
+git revert HEAD   # or checkout a previous commit
+git push origin main   # triggers CD again with the reverted code
+```
+
+Or manually on the VPS:
 ```bash
 git checkout <last-good-commit>
 make prod
@@ -242,21 +242,48 @@ make prod
 
 ## CI/CD
 
-GitHub Actions runs on every pull request targeting `main`. The pipeline has two sequential jobs:
+### Flow
+
+```
+feature branch  →  PR to main  →  CI (lint + test)  →  merge  →  auto-deploy to VPS
+```
+
+### CI — pull requests
+
+GitHub Actions runs on every PR targeting `main`. Two sequential jobs:
 
 | Job | Tool | What it checks |
 |-----|------|---------------|
 | `lint` | `ruff` | Code style and import order across `app/` and `tests/` |
-| `test` | `pytest` | Full test suite (runs only if lint passes) |
+| `test` | `pytest` | Unit + quota tests (runs only if lint passes) |
 
-Workflow file: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
-Tests run with a mocked MongoDB connection (`APP_ENV=dev`, `MONGODB_URI_LOCAL=mongodb://localhost:27017/`). To run locally:
+### CD — deploy on merge
+
+Merging to `main` triggers automatic deployment to the VPS:
+
+1. SSH into the VPS
+2. `git pull origin main`
+3. `make prod` — rebuilds image, restarts prod stack, waits up to 120s for health check
+
+Workflow: [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
+
+Required GitHub secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`.
+
+### Run CI checks locally
 
 ```bash
 PYTHON="/home/abdo_kamar/Projects/.venv/bin/python"
 "$PYTHON" -m ruff check app/ tests/
 "$PYTHON" -m pytest tests/ -v
+```
+
+### Release tagging
+
+```bash
+make tag VERSION=v1.0.0
+git push origin v1.0.0
 ```
 
 ---
@@ -374,6 +401,7 @@ MongoDB session persistence (chat_sessions collection)
 | Session store | MongoDB `chat_sessions_dev/prod` — full turn history persisted, owned by authenticated user |
 | Auth | `POST /api/v2/chat` requires JWT cookie — returns `401` if unauthenticated |
 | Ownership | Sessions are user-scoped — resuming another user's session returns `403` |
+| Quota | Per-user daily limits (free=3, supporter=10) — atomic MongoDB `$inc`, returns `429` before LLM call |
 
 ### SSE event stream
 
@@ -470,6 +498,46 @@ Require valid session cookie. Returns `401` if not logged in.
 | GET | `/api/v2/chat/sessions/{session_id}` | — | `ChatSession` (full history) · **auth required** |
 | DELETE | `/api/v2/chat/sessions/{session_id}` | — | `204` · **auth required** |
 | GET | `/health` | — | `{ "status": "ok", "chatbot": true/false }` |
+
+### Chatbot — user quota (daily limits)
+
+`POST /api/v2/chat` enforces per-user daily request limits based on user tier:
+
+| Tier | Daily limit | Notes |
+|------|-------------|-------|
+| `free` | 3 requests | Default for all new users |
+| `supporter` | 10 requests | Set manually after donation |
+| `unlimited` | no limit | Admins / special accounts |
+
+When the limit is reached, the endpoint returns **HTTP 429** before invoking the LLM (no cost incurred):
+
+```json
+{
+  "detail": {
+    "ar": "لقد وصلت إلى الحد اليومي. ادعم المشروع للحصول على المزيد.",
+    "limit": 3,
+    "used": 4,
+    "upgrade_hint": "supporter"
+  }
+}
+```
+
+Counters are stored in the `user_quotas` MongoDB collection and expire automatically after 2 days. Limits are configurable via env vars:
+
+```bash
+QUOTA_FREE_DAILY=3
+QUOTA_SUPPORTER_DAILY=10
+QUOTA_UNLIMITED_DAILY=-1   # -1 = no limit
+```
+
+To upgrade a user's tier (after a donation), set `tier: "supporter"` directly on their document in `auth_users`:
+
+```bash
+docker exec -it hadathana-mongo-dev mongosh HadithDataDev
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "supporter" } })
+```
+
+---
 
 ### Chatbot feature flag
 
