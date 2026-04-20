@@ -6,14 +6,13 @@ No live connections required.
 """
 import json
 import uuid
-import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from httpx import AsyncClient, ASGITransport
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessageChunk
-
 
 # ── Shared fixtures ────────────────────────────────────────────────────────────
 
@@ -129,8 +128,8 @@ async def chat_client():
         patch("app.chatbot.router.get_or_create_session", new_callable=AsyncMock) as mock_get_session,
         patch("app.chatbot.router.append_turn", new_callable=AsyncMock) as mock_append,
     ):
-        from app.chatbot.models import ChatSession
         from app.auth.config import current_active_user
+        from app.chatbot.models import ChatSession
         from app.main import app
 
         mock_user = _make_mock_user()

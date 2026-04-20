@@ -9,8 +9,9 @@ Run via:
   APP_ENV=dev pytest tests/test_data_presence.py -v
 """
 import os
-import pytest
+
 import httpx
+import pytest
 
 _ENV = os.getenv("APP_ENV", "dev")
 BASE_URL = "http://localhost:8001" if _ENV == "dev" else "http://localhost:8000"
