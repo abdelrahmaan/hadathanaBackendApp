@@ -11,7 +11,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
-from app.chatbot.config import QDRANT_COLLECTION, EMBED_DIM
+from app.chatbot.config import EMBED_DIM, QDRANT_COLLECTION
 
 logger = logging.getLogger("hadathana.chatbot.indexer")
 

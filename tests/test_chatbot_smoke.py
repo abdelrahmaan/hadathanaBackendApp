@@ -11,8 +11,9 @@ Run via Makefile:
 """
 import json
 import os
-import pytest
+
 import httpx
+import pytest
 
 # Resolve base URL from APP_ENV (mirrors app/config.py logic)
 _ENV = os.getenv("APP_ENV", "dev")
