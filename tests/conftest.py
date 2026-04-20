@@ -9,6 +9,7 @@ def make_mock_collection():
     mock_collection.find.return_value.__aiter__ = AsyncMock(return_value=iter([]))
     mock_collection.count_documents = AsyncMock(return_value=0)
     mock_collection.find_one = AsyncMock(return_value=None)
+    mock_collection.find_one_and_update = AsyncMock(return_value={"request_count": 1})
     mock_collection.insert_one = AsyncMock(return_value=MagicMock(inserted_id="mock_id"))
     mock_collection.delete_one = AsyncMock(return_value=MagicMock(deleted_count=1))
     return mock_collection

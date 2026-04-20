@@ -100,6 +100,7 @@ async def chat_client():
     mock_collection = MagicMock()
     mock_collection.find_one = AsyncMock(return_value=None)
     mock_collection.update_one = AsyncMock(return_value=None)
+    mock_collection.find_one_and_update = AsyncMock(return_value={"request_count": 1})
 
     mock_db = MagicMock()
     mock_db.__getitem__ = MagicMock(return_value=mock_collection)
@@ -381,3 +382,26 @@ async def test_citation_resource_id_populated(chat_client):
     complete = next(e for e in events if e["type"] == "assistant_message_complete")
     for cit in complete["data"]["citations"]:
         assert cit["resource_id"] != "", "resource_id must not be empty"
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_429_when_daily_quota_exceeded(chat_client):
+    """Over-limit free user gets 429 before the agent is invoked."""
+    with patch(
+        "app.chatbot.quota.database.get_user_quotas_collection",
+        return_value=MagicMock(
+            find_one_and_update=AsyncMock(return_value={"request_count": 4})
+        ),
+    ):
+        response = await chat_client.post(
+            "/api/v2/chat",
+            json={"question": "هل هذا هو الطلب الرابع اليوم؟"},
+        )
+
+    assert response.status_code == 429
+    data = response.json()["detail"]
+    assert data["limit"] == 3
+    assert data["used"] == 4
+    assert data["upgrade_hint"] == "supporter"
+    assert "لقد وصلت" in data["ar"]
+    chat_client.mock_get_session.assert_not_called()
