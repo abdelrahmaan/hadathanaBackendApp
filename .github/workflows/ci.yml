@@ -26,6 +26,16 @@ jobs:
   test:
     needs: lint
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand(\"ping\").ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -44,3 +54,6 @@ jobs:
           APP_ENV: dev
           MONGODB_URI_LOCAL: mongodb://localhost:27017/
           DB_NAME_DEV: HadithDataDev
+          COHERE_API_KEY: stub-for-ci
+          OPENROUTER_API_KEY: stub-for-ci
+          QDRANT_URL: http://localhost:6333
