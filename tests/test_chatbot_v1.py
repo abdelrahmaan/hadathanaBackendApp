@@ -6,14 +6,13 @@ No live connections required.
 """
 import json
 import uuid
-import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from httpx import AsyncClient, ASGITransport
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessageChunk
-
 
 # ── Shared fixtures ────────────────────────────────────────────────────────────
 
@@ -58,17 +57,12 @@ async def _async_gen(items):
 
 
 def _make_mock_agent(tokens: list[str]) -> MagicMock:
-    """
-    Build a mock agent whose astream() yields (AIMessageChunk, metadata) tuples,
-    matching what _extract_token() expects from stream_mode="messages".
-    Uses side_effect so each call produces a fresh generator.
-    """
     async def _stream(*args, **kwargs):
         for t in tokens:
             yield (AIMessageChunk(content=t), {"langgraph_node": "agent"})
 
     agent = MagicMock()
-    agent.astream = MagicMock(side_effect=_stream)
+    agent.astream = _stream
     return agent
 
 
@@ -129,8 +123,8 @@ async def chat_client():
         patch("app.chatbot.router.get_or_create_session", new_callable=AsyncMock) as mock_get_session,
         patch("app.chatbot.router.append_turn", new_callable=AsyncMock) as mock_append,
     ):
-        from app.chatbot.models import ChatSession
         from app.auth.config import current_active_user
+        from app.chatbot.models import ChatSession
         from app.main import app
 
         mock_user = _make_mock_user()
@@ -244,10 +238,6 @@ async def test_refusal_when_no_context(chat_client):
 
 
 def _make_refs_agent_with_docs(tokens: list[str]) -> MagicMock:
-    """
-    Build a mock agent that stashes MOCK_DOCS keyed by the thread_id from config,
-    simulating what the real search_hadiths tool does inside astream.
-    """
     from app.chatbot import agent as agent_module
 
     async def _stream_with_stash(*args, **kwargs):
@@ -259,7 +249,7 @@ def _make_refs_agent_with_docs(tokens: list[str]) -> MagicMock:
             yield (AIMessageChunk(content=t), {"langgraph_node": "agent"})
 
     agent = MagicMock()
-    agent.astream = MagicMock(side_effect=_stream_with_stash)
+    agent.astream = _stream_with_stash
     return agent
 
 

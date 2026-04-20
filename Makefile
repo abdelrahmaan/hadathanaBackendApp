@@ -28,6 +28,14 @@ dev-ps:
 
 prod:
 	$(PROD_COMPOSE) up -d --build
+	@echo "Waiting for API to be ready (up to 120s)..."
+	@for i in $$(seq 1 24); do \
+		curl -sf http://localhost:8000/health > /dev/null && \
+			echo "Health check passed - prod is up." && exit 0; \
+		echo "  attempt $$i/24 - retrying in 5s..."; \
+		sleep 5; \
+	done; \
+	echo "Health check FAILED after 120s - check logs with: make prod-logs" && exit 1
 
 prod-logs:
 	$(PROD_COMPOSE) logs -f api
@@ -74,7 +82,7 @@ test-db-prod:
 
 # ── Utilities ─────────────────────────────────────────────────
 
-.PHONY: status health
+.PHONY: status health tag
 
 status:
 	@echo "=== Dev ===" && docker compose ps 2>/dev/null || true
@@ -85,3 +93,10 @@ health:
 	@echo "Dev  (8001):" && curl -s http://localhost:8001/health | python3 -m json.tool 2>/dev/null || echo "  not running"
 	@echo ""
 	@echo "Prod (8000):" && curl -s http://localhost:8000/health | python3 -m json.tool 2>/dev/null || echo "  not running"
+
+# ── Release ───────────────────────────────────────────────────
+
+tag:
+	@test -n "$(VERSION)" || (echo "Usage: make tag VERSION=v1.x.x" && exit 1)
+	git tag -a $(VERSION) -m "Release $(VERSION)"
+	@echo "Tagged $(VERSION). Push with: git push origin $(VERSION)"
