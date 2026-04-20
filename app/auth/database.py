@@ -51,6 +51,7 @@ class MotorUserDatabase(BaseUserDatabase[User, uuid.UUID]):
         create_dict.setdefault("is_active", True)
         create_dict.setdefault("is_superuser", False)
         create_dict.setdefault("is_verified", False)
+        create_dict.setdefault("tier", "free")
         await self.collection.insert_one(create_dict)
         return self._doc_to_user(create_dict)
 

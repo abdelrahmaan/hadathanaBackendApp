@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, date, datetime, timedelta
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -21,6 +22,7 @@ EXPECTED_COLLECTIONS = {
     "analytics_narrator_stats_shamela": 100,
     "chat_sessions_dev": 0,   # optional — empty at startup
     "chat_sessions_prod": 0,  # optional — empty at startup
+    "user_quotas": 0,         # optional — created by index initialization
 }
 
 
@@ -82,9 +84,33 @@ def get_bookmarks_collection(db):
     return db["user_bookmarks"]
 
 
+def get_user_quotas_collection(db):
+    return db["user_quotas"]
+
+
+def get_quota_expiry(for_day: date | None = None) -> datetime:
+    target_day = for_day or date.today()
+    expires_on = target_day + timedelta(days=2)
+    return datetime.combine(expires_on, datetime.min.time(), tzinfo=UTC)
+
+
+async def ensure_indexes() -> None:
+    db = get_db(get_client())
+    quotas = get_user_quotas_collection(db)
+    await quotas.create_index(
+        [("user_id", 1), ("usage_date", 1)],
+        unique=True,
+    )
+    await quotas.create_index(
+        "expires_at",
+        expireAfterSeconds=0,
+    )
+
+
 async def connect():
     global _client
     _client = AsyncIOMotorClient(settings.get_mongodb_uri())
+    await ensure_indexes()
 
 
 async def validate_connection() -> dict:

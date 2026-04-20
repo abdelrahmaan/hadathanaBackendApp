@@ -11,6 +11,7 @@ from app.auth.models import User
 from app.chatbot.agent import get_agent, get_last_docs
 from app.chatbot.models import ChatRequest, ChatSession, ChatSessionMeta, Citation
 from app.chatbot.prompts import THREAD_RENAME_PROMPT
+from app.chatbot.quota import check_quota
 from app.chatbot.session import append_turn, get_or_create_session, update_session_title
 from app.config import settings
 from app.database import get_client, get_db
@@ -63,7 +64,11 @@ async def _generate_title(question: str) -> str:
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest, user: User = Depends(current_active_user)):
+async def chat(
+    request: ChatRequest,
+    user: User = Depends(current_active_user),
+    _: None = Depends(check_quota),
+):
     db = get_db(get_client())
     session = await get_or_create_session(db, request.session_id, str(user.id))
     agent = get_agent()

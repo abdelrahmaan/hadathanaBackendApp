@@ -7,12 +7,13 @@ class User(schemas.BaseUser[uuid.UUID]):
     """Internal DB user model — includes hashed_password (required by UserManager)."""
 
     hashed_password: str
+    tier: str = "free"
 
 
 class UserRead(schemas.BaseUser[uuid.UUID]):
     """Public user schema returned by API endpoints."""
 
-    pass
+    tier: str = "free"
 
 
 class UserCreate(schemas.BaseUserCreate):

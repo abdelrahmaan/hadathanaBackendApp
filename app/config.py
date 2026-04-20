@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     qdrant_url: str = "http://qdrant:6333"
     chatbot_model: str = "google/gemini-3-flash-preview"
+    quota_free_daily: int = 3
+    quota_supporter_daily: int = 10
+    quota_unlimited_daily: int = -1
 
     # Auth (JWT + session)
     jwt_secret: str = "changeme-generate-with-openssl-rand-hex-32"
@@ -58,6 +61,13 @@ class Settings(BaseSettings):
     def get_cors_origins(self) -> list[str]:
         raw = self.cors_origins_dev if self.is_dev else self.cors_origins
         return [o.strip() for o in raw.split(",") if o.strip()]
+
+    def get_daily_limit(self, tier: str) -> int:
+        return {
+            "free": self.quota_free_daily,
+            "supporter": self.quota_supporter_daily,
+            "unlimited": self.quota_unlimited_daily,
+        }.get(tier, self.quota_free_daily)
 
 
 settings = Settings()
