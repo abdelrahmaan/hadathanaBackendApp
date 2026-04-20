@@ -76,7 +76,7 @@ def _make_mock_agent(tokens: list[str]) -> MagicMock:
             yield (AIMessageChunk(content=token), {"langgraph_node": "agent"})
 
     agent = MagicMock()
-    agent.astream = MagicMock(side_effect=_stream)
+    agent.astream = _stream
     return agent
 
 

@@ -57,17 +57,12 @@ async def _async_gen(items):
 
 
 def _make_mock_agent(tokens: list[str]) -> MagicMock:
-    """
-    Build a mock agent whose astream() yields (AIMessageChunk, metadata) tuples,
-    matching what _extract_token() expects from stream_mode="messages".
-    Uses side_effect so each call produces a fresh generator.
-    """
     async def _stream(*args, **kwargs):
         for t in tokens:
             yield (AIMessageChunk(content=t), {"langgraph_node": "agent"})
 
     agent = MagicMock()
-    agent.astream = MagicMock(side_effect=_stream)
+    agent.astream = _stream
     return agent
 
 
@@ -243,10 +238,6 @@ async def test_refusal_when_no_context(chat_client):
 
 
 def _make_refs_agent_with_docs(tokens: list[str]) -> MagicMock:
-    """
-    Build a mock agent that stashes MOCK_DOCS keyed by the thread_id from config,
-    simulating what the real search_hadiths tool does inside astream.
-    """
     from app.chatbot import agent as agent_module
 
     async def _stream_with_stash(*args, **kwargs):
@@ -258,7 +249,7 @@ def _make_refs_agent_with_docs(tokens: list[str]) -> MagicMock:
             yield (AIMessageChunk(content=t), {"langgraph_node": "agent"})
 
     agent = MagicMock()
-    agent.astream = MagicMock(side_effect=_stream_with_stash)
+    agent.astream = _stream_with_stash
     return agent
 
 
