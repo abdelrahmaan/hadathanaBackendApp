@@ -2,12 +2,12 @@ import uuid
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import app.chatbot.quota as _quota_module
 import pytest
 from fastapi import HTTPException
 
 from app.auth.models import User
 from app.chatbot.quota import check_quota
-import app.chatbot.quota as _quota_module
 
 # Capture the database module that check_quota actually uses.
 # test_chatbot_sessions.py purges sys.modules["app.*"] between tests, which
