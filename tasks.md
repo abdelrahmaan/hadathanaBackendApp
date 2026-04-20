@@ -196,7 +196,7 @@
 ## v2.0 - Production Release
 
 ### API Enhancements
-- [x] Add API authentication and rate limiting
+- [x] Add API authentication and rate limiting (per-user daily quota: free=3/day, supporter=10/day, unlimited; 429 on breach)
 - [ ] Add write endpoints (POST/PUT/DELETE) for data management
 - [ ] Auto-generated API documentation (Swagger/ReDoc polish)
 - [ ] Response caching for frequently accessed data
@@ -214,12 +214,11 @@
 - [ ] Integration tests with MongoDB test database
 - [x] CI/CD pipeline (GitHub Actions): run tests + linting on every PR, block merge to `main` if checks fail — `.github/workflows/ci.yml` (lint job: ruff; test job: pytest)
 - [x] Automated linting and type checking (ruff in CI)
-- [ ] Branch protection rule on `main`: require passing CI checks before merge (manual GitHub settings step)
-
-### Auto Deployment
-- [ ] Auto-deploy on push to `main` (Railway / Render webhook or GitHub Actions deploy step)
-- [ ] Remove manual `tmux` restart workflow — deployment must be zero-touch
-- [ ] Health check after deploy to confirm the new version is live
+- [x] Branch protection (GitHub Ruleset on `main`): PRs required, status checks enforced
+- [x] Auto-deploy on merge to `main` — `.github/workflows/deploy.yml` SSHes into VPS and runs `make prod`
+- [x] Remove manual `tmux` restart workflow — deployment is now zero-touch via GitHub Actions CD
+- [x] Health check after deploy — `make prod` retries `/health` for up to 120s before reporting success/failure
+- [x] Release tagging — `make tag VERSION=v1.x.x` creates annotated git tag
 
 ### Deployment & Monitoring
 - [ ] Deploy backend to cloud (Railway / Render / AWS)
@@ -251,8 +250,24 @@
 - [x] CORS updated to allow POST
 - [x] 4 unit tests in `tests/test_chatbot_v1.py`
 - [x] Dedicated session API tests in `tests/test_chatbot_sessions.py` covering auth, ownership, list/get/delete, and delete-then-404 flow
+- [x] Per-user daily quota system — `free: 3/day`, `supporter: 10/day`, `unlimited: -1` — tier stored on user, counter in `user_quotas` collection, 429 with Arabic message + upgrade hint on limit
 - [ ] Manual eval: test 10+ Arabic questions, tune system prompt
 - [ ] Promote to prod after eval passes
+
+### feat: per-user daily quota system (2026-04-20)
+**Status**: done
+**Summary**: Implemented tier-based daily request limits for the chatbot. Free users get 3 requests/day, supporter users get 10/day, unlimited users bypass quota entirely. Limits are env-var configurable. On limit breach, returns HTTP 429 with Arabic message + upgrade hint. Counter stored in `user_quotas` MongoDB collection with atomic `$inc` (no Redis needed). TTL index auto-cleans old counters after 2 days.
+**Touched files**:
+- `app/config.py` — added `quota_free_daily`, `quota_supporter_daily`, `quota_unlimited_daily`, `get_daily_limit()`
+- `app/auth/models.py` — added `tier: str = "free"` to `User` and `UserRead`
+- `app/auth/database.py` — `create()` sets `tier="free"` default
+- `app/database.py` — added `get_user_quotas_collection()`, `get_quota_expiry()`, `ensure_indexes()`, `user_quotas` in `EXPECTED_COLLECTIONS`
+- `app/chatbot/quota.py` — new: `check_quota` FastAPI dependency
+- `app/chatbot/router.py` — wired `check_quota` into `POST /api/v2/chat`
+- `.env.example` — added `QUOTA_FREE_DAILY`, `QUOTA_SUPPORTER_DAILY`, `QUOTA_UNLIMITED_DAILY`
+- `tests/test_quota.py` — new: 4 unit tests (first/at-limit/over-limit/unlimited)
+- `tests/test_chatbot_v1.py` — added 429 route-level test
+- `tests/conftest.py` — updated mocks for quota collection
 
 ### feat: complete chatbot user sessions spec (2026-04-18)
 **Status**: done
