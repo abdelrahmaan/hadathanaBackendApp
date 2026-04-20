@@ -112,6 +112,9 @@ async def _client_context(
         patch("app.database.get_podia_narrators_collection", return_value=other_col),
         patch("app.database.get_auth_users_collection", return_value=other_col),
         patch("app.database.get_bookmarks_collection", return_value=other_col),
+        patch("app.database.get_user_quotas_collection", return_value=MagicMock(
+            find_one_and_update=AsyncMock(return_value={"request_count": 1})
+        )),
         patch("app.chatbot.qdrant.connect_qdrant", new_callable=AsyncMock),
         patch("app.chatbot.qdrant.disconnect_qdrant", new_callable=AsyncMock),
         patch("app.chatbot.agent.build_agent"),
