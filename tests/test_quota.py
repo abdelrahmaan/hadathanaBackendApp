@@ -2,10 +2,10 @@ import uuid
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import app.chatbot.quota as _quota_module
 import pytest
 from fastapi import HTTPException
 
+import app.chatbot.quota as _quota_module
 from app.auth.models import User
 from app.chatbot.quota import check_quota
 
