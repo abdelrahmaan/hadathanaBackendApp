@@ -1,7 +1,8 @@
 import json
 import logging
 import re
-from datetime import date, datetime, time, timedelta, timezone as tz
+from datetime import date, datetime, time, timedelta
+from datetime import timezone as tz
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -10,7 +11,13 @@ from langchain.chat_models import init_chat_model
 from app.auth.config import current_active_user
 from app.auth.models import User
 from app.chatbot.agent import get_agent, get_last_docs
-from app.chatbot.models import ChatRequest, ChatSession, ChatSessionMeta, Citation, QuotaStatus
+from app.chatbot.models import (
+    ChatRequest,
+    ChatSession,
+    ChatSessionMeta,
+    Citation,
+    QuotaStatus,
+)
 from app.chatbot.prompts import THREAD_RENAME_PROMPT
 from app.chatbot.quota import check_quota
 from app.chatbot.session import append_turn, get_or_create_session, update_session_title

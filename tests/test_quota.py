@@ -1,11 +1,11 @@
 import sys
 import uuid
-from contextlib import ExitStack
-from datetime import datetime, timezone
+from contextlib import ExitStack, asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 
 import app.chatbot.quota as _quota_module
 from app.auth.models import User
@@ -113,10 +113,6 @@ _BASE_DB_PATCHES = [
     ("app.database.get_auth_users_collection", dict(return_value=MagicMock())),
     ("app.database.get_bookmarks_collection", dict(return_value=MagicMock())),
 ]
-
-
-from contextlib import asynccontextmanager
-from httpx import ASGITransport, AsyncClient
 
 
 @asynccontextmanager
