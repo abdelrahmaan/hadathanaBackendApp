@@ -1,6 +1,8 @@
 import json
 import logging
 import re
+from datetime import date, datetime, time, timedelta
+from datetime import timezone as tz
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -9,12 +11,18 @@ from langchain.chat_models import init_chat_model
 from app.auth.config import current_active_user
 from app.auth.models import User
 from app.chatbot.agent import get_agent, get_last_docs
-from app.chatbot.models import ChatRequest, ChatSession, ChatSessionMeta, Citation
+from app.chatbot.models import (
+    ChatRequest,
+    ChatSession,
+    ChatSessionMeta,
+    Citation,
+    QuotaStatus,
+)
 from app.chatbot.prompts import THREAD_RENAME_PROMPT
 from app.chatbot.quota import check_quota
 from app.chatbot.session import append_turn, get_or_create_session, update_session_title
 from app.config import settings
-from app.database import get_client, get_db
+from app.database import get_client, get_db, get_user_quotas_collection
 
 logger = logging.getLogger("hadathana.chatbot.router")
 
@@ -199,6 +207,23 @@ async def chat(
         await update_session_title(db, session.session_id, title)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/chat/quota", response_model=QuotaStatus)
+async def get_quota(user: User = Depends(current_active_user)):
+    """Return the authenticated user's quota usage for today."""
+    tier = getattr(user, "tier", "free")
+    limit = settings.get_daily_limit(tier)
+
+    today = date.today()
+    quotas = get_user_quotas_collection(get_db(get_client()))
+    doc = await quotas.find_one({"user_id": str(user.id), "usage_date": today.isoformat()})
+    used = int(doc["request_count"]) if doc else 0
+
+    remaining = -1 if limit == -1 else max(0, limit - used)
+    resets_at = datetime.combine(today + timedelta(days=1), time.min).replace(tzinfo=tz.utc)
+
+    return QuotaStatus(tier=tier, limit=limit, used=used, remaining=remaining, resets_at=resets_at)
 
 
 @router.get("/chat/sessions", response_model=list[ChatSessionMeta])

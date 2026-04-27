@@ -1,9 +1,11 @@
+import sys
 import uuid
-from contextlib import ExitStack
+from contextlib import ExitStack, asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from httpx import ASGITransport, AsyncClient
 
 import app.chatbot.quota as _quota_module
 from app.auth.models import User
@@ -92,3 +94,103 @@ async def test_check_quota_skips_unlimited_tier():
         await check_quota(_make_user("unlimited"))
 
     collection.find_one_and_update.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v2/chat/quota endpoint tests
+# ---------------------------------------------------------------------------
+
+_BASE_DB_PATCHES = [
+    ("app.database.connect", dict(new_callable=AsyncMock)),
+    ("app.database.disconnect", dict(new_callable=AsyncMock)),
+    ("app.database.validate_connection", dict(new_callable=AsyncMock)),
+    ("app.database.get_client", dict(return_value=MagicMock())),
+    ("app.database.get_db", dict(return_value=MagicMock())),
+    ("app.database.get_hadiths_collection", dict(return_value=MagicMock())),
+    ("app.database.get_narrators_collection", dict(return_value=MagicMock())),
+    ("app.database.get_podia_hadiths_collection", dict(return_value=MagicMock())),
+    ("app.database.get_podia_narrators_collection", dict(return_value=MagicMock())),
+    ("app.database.get_auth_users_collection", dict(return_value=MagicMock())),
+    ("app.database.get_bookmarks_collection", dict(return_value=MagicMock())),
+]
+
+
+@asynccontextmanager
+async def _quota_client(user=None, quota_doc=None):
+    """Async context manager: app client with DB mocked and optional auth override."""
+    for key in list(sys.modules.keys()):
+        if key.startswith("app"):
+            del sys.modules[key]
+
+    quota_col = MagicMock()
+    quota_col.find_one = AsyncMock(return_value=quota_doc)
+
+    patches = [patch(target, **kwargs) for target, kwargs in _BASE_DB_PATCHES]
+    patches.append(patch("app.database.get_user_quotas_collection", return_value=quota_col))
+
+    for p in patches:
+        p.start()
+
+    try:
+        from app.auth.config import current_active_user
+        from app.main import app
+
+        if user is not None:
+            app.dependency_overrides[current_active_user] = lambda: user
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c
+
+        app.dependency_overrides.clear()
+    finally:
+        for p in reversed(patches):
+            p.stop()
+
+
+@pytest.mark.asyncio
+async def test_quota_status_no_usage():
+    """Fresh user with no usage today — used=0, remaining=3."""
+    async with _quota_client(user=_make_user("free"), quota_doc=None) as c:
+        resp = await c.get("/api/v2/chat/quota")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tier"] == "free"
+    assert data["limit"] == 3
+    assert data["used"] == 0
+    assert data["remaining"] == 3
+    assert "resets_at" in data
+
+
+@pytest.mark.asyncio
+async def test_quota_status_after_requests():
+    """User has made 2 requests — used=2, remaining=1."""
+    async with _quota_client(user=_make_user("free"), quota_doc={"request_count": 2}) as c:
+        resp = await c.get("/api/v2/chat/quota")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["used"] == 2
+    assert data["remaining"] == 1
+
+
+@pytest.mark.asyncio
+async def test_quota_status_unlimited():
+    """Unlimited tier — limit=-1, remaining=-1."""
+    async with _quota_client(user=_make_user("unlimited"), quota_doc=None) as c:
+        resp = await c.get("/api/v2/chat/quota")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tier"] == "unlimited"
+    assert data["limit"] == -1
+    assert data["remaining"] == -1
+
+
+@pytest.mark.asyncio
+async def test_quota_status_unauthenticated():
+    """No auth cookie — 401."""
+    async with _quota_client(user=None) as c:
+        resp = await c.get("/api/v2/chat/quota")
+
+    assert resp.status_code == 401

@@ -449,55 +449,441 @@ make test-chatbot-dev
 
 ## Endpoints
 
+> All paginated responses accept `skip` (default `0`) and `limit` (default `20`, max `100`) query params.
+> Text search params accept Arabic with or without tashkeel — normalization is applied automatically.
+> Auth endpoints use **HttpOnly JWT cookies**. Frontend must send `credentials: "include"` (fetch) or `withCredentials: true` (axios).
+
+---
+
+### `GET /health`
+
+No input. Returns service health and collection counts.
+
+```json
+{
+  "status": "ok",
+  "mongodb": "connected",
+  "chatbot": true,
+  "collections": {
+    "processed_podia_books": 7076,
+    "processed_podia_narrators": 1555
+  }
+}
+```
+
+---
+
 ### Auth
 
-All auth endpoints are under `/auth`. Login uses **form data** (`application/x-www-form-urlencoded`), all others use JSON. Sessions are managed via **HttpOnly cookies** — frontend must send requests with `credentials: "include"` (fetch) or `withCredentials: true` (axios).
+#### `POST /auth/register`
 
-| Method | Path | Body | Response | Notes |
-|--------|------|------|----------|-------|
-| POST | `/auth/register` | `{ "email", "password" }` | `201` UserRead | |
-| POST | `/auth/login` | form: `username=&password=` | `204` + sets cookie | |
-| POST | `/auth/logout` | — | `204` + clears cookie | |
-| POST | `/auth/forgot-password` | `{ "email" }` | `202` always | No user enumeration |
-| POST | `/auth/reset-password` | `{ "token", "password" }` | `200` | Token from email link |
+**Body** (JSON):
+```json
+{ "email": "user@example.com", "password": "Str0ngPass!123" }
+```
 
-### Bookmarks (authenticated)
+**Response** `201`:
+```json
+{ "id": "<uuid>", "email": "user@example.com", "is_active": true, "is_verified": false, "tier": "free" }
+```
 
-Require valid session cookie. Returns `401` if not logged in.
+#### `POST /auth/login`
 
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| GET | `/api/v2/bookmarks` | — | `{ items[], total }` (skip/limit) |
-| POST | `/api/v2/bookmarks` | `{ "hadith_url", "source" }` | `201` BookmarkRead · `409` if duplicate |
-| DELETE | `/api/v2/bookmarks/{hadith_url}` | — | `204` · `404` if not found |
+**Body** (form data — `application/x-www-form-urlencoded`):
+```
+username=user@example.com&password=Str0ngPass!123
+```
 
-### v1 — Shamela
+**Response** `204` + sets `fastapiusersauth` HttpOnly cookie.
 
-| Method | Path | Query params | Response |
-|--------|------|-------------|----------|
-| GET | `/api/v1/hadiths` | `hadith_plain`, `narrator_id`, `chain_type`, `skip`, `limit` | `PaginatedHadiths` |
-| GET | `/api/v1/hadiths/{hadith_index}` | — | `Hadith` |
-| GET | `/api/v1/narrators` | `name_plain`, `kunya`, `nasab`, `skip`, `limit` | `PaginatedNarrators` |
-| GET | `/api/v1/narrators/{narrator_id}` | — | `Narrator` |
-| GET | `/api/v1/narrators/{narrator_id}/stats` | — | `NarratorStats` |
+#### `POST /auth/logout`
 
-### v2 — Podia
+No body. **Response** `204` + clears cookie.
 
-| Method | Path | Query params | Response |
-|--------|------|-------------|----------|
-| GET | `/api/v2/hadiths` | `hadith_text_plain`, `rawi_id`, `book`, `topic`, `skip`, `limit` | `PaginatedPodiaHadiths` |
-| GET | `/api/v2/hadiths/{hadith_index}` | — | `PodiaHadith` |
-| GET | `/api/v2/narrators` | `full_name_plain`, `rank`, `skip`, `limit` | `PaginatedPodiaNarrators` |
-| GET | `/api/v2/narrators/{rawi_id}` | — | `PodiaNarrator` |
-| GET | `/api/v2/narrators/{rawi_id}/tarajem` | — | `PodiaNarratorTarajem` |
-| GET | `/api/v2/narrators/{rawi_id}/stats` | — | `PodiaNarratorStats` |
-| GET | `/api/v2/topics` | — | `TopicsResponse` |
-| GET | `/api/v2/topics/{topic}/hadiths` | `skip`, `limit` | `PaginatedPodiaHadiths` |
-| POST | `/api/v2/chat` | body: `{ "question", "session_id?" }` | SSE stream · **auth required** |
-| GET | `/api/v2/chat/sessions` | `skip`, `limit` | `[ChatSessionMeta]` · **auth required** |
-| GET | `/api/v2/chat/sessions/{session_id}` | — | `ChatSession` (full history) · **auth required** |
-| DELETE | `/api/v2/chat/sessions/{session_id}` | — | `204` · **auth required** |
-| GET | `/health` | — | `{ "status": "ok", "chatbot": true/false }` |
+#### `POST /auth/forgot-password`
+
+**Body**: `{ "email": "user@example.com" }`
+**Response** `202` always (no user enumeration).
+
+#### `POST /auth/reset-password`
+
+**Body**: `{ "token": "<token-from-email>", "password": "NewPass!123" }`
+**Response** `200`.
+
+---
+
+### Bookmarks — requires auth cookie
+
+#### `GET /api/v2/bookmarks`
+
+Query params: `skip`, `limit`
+
+**Response**:
+```json
+{
+  "items": [
+    { "hadith_url": "https://...", "source": "podia", "created_at": "2024-01-01T00:00:00Z" }
+  ],
+  "total": 12
+}
+```
+
+#### `POST /api/v2/bookmarks`
+
+**Body**:
+```json
+{ "hadith_url": "https://hadathana.app/hadith/1", "source": "podia" }
+```
+
+**Response** `201`:
+```json
+{ "hadith_url": "https://...", "source": "podia", "created_at": "2024-01-01T00:00:00Z" }
+```
+Returns `409` if already bookmarked.
+
+#### `DELETE /api/v2/bookmarks/{hadith_url}`
+
+URL-encode the `hadith_url` path segment. No body. **Response** `204`. Returns `404` if not found.
+
+---
+
+### v1 — Shamela Hadiths
+
+#### `GET /api/v1/hadiths`
+
+Query params:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `hadith_plain` | string | Search hadith text (Arabic, normalized) |
+| `narrator_id` | int | Filter by narrator ID |
+| `chain_type` | string | Filter by chain type (`primary`, `nested`, `follow_up`) |
+| `skip` / `limit` | int | Pagination |
+
+**Response**:
+```json
+{
+  "items": [
+    {
+      "id": "<mongo_id>",
+      "hadith_index": 1,
+      "source": "shamela",
+      "hadith": "حَدَّثَنَا الْحُمَيْدِيُّ...",
+      "hadith_plain": "حدثنا الحميدي...",
+      "matn_plain": ["إنما الأعمال بالنيات"],
+      "n_matn": 1,
+      "n_chains": 1,
+      "chains": [
+        {
+          "chain_id": "c1",
+          "type": "primary",
+          "narrators": [
+            { "name": "البخاري", "role": "lead", "narrator_id": 1 }
+          ]
+        }
+      ],
+      "unique_narrators": [{ "name": "عمر بن الخطاب", "narrator_id": 822 }]
+    }
+  ],
+  "total": 7008
+}
+```
+
+#### `GET /api/v1/hadiths/{hadith_index}`
+
+**Response**: Single `Hadith` object (same shape as items above). Returns `404` if not found.
+
+---
+
+### v1 — Shamela Narrators
+
+#### `GET /api/v1/narrators`
+
+Query params:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `name_plain` | string | Search by name (Arabic, normalized) |
+| `kunya` | string | Search by kunya (e.g. أبو عبدالله) |
+| `nasab` | string | Search by nasab (lineage) |
+| `skip` / `limit` | int | Pagination |
+
+**Response**:
+```json
+{
+  "items": [
+    {
+      "id": "<mongo_id>",
+      "narrator_id": 822,
+      "name": "عُمَرُ بْنُ الْخَطَّابِ",
+      "name_plain": "عمر بن الخطاب",
+      "kunya": "أبو حفص",
+      "nasab": "القرشي",
+      "death_date": "23 هـ",
+      "tabaqa": "الصحابة",
+      "rank_ibn_hajar": "صحابي",
+      "rank_dhahabi": "صحابي",
+      "jarh_wa_tadil": [
+        { "scholar": "ابن حجر", "quotes": ["ثقة"] }
+      ]
+    }
+  ],
+  "total": 380
+}
+```
+
+#### `GET /api/v1/narrators/{narrator_id}`
+
+**Response**: Single `Narrator` object. Returns `404` if not found.
+
+#### `GET /api/v1/narrators/{narrator_id}/stats`
+
+**Response**:
+```json
+{
+  "narrator_id": 822,
+  "hadith_count": 45,
+  "teachers": [{ "narrator_id": 100, "name": "النبي ﷺ", "freq": 30 }],
+  "students": [{ "narrator_id": 900, "name": "ابن عمر", "freq": 20 }]
+}
+```
+`freq` = number of distinct hadiths in which the teacher→student pair appears together.
+
+---
+
+### v2 — Podia Hadiths
+
+#### `GET /api/v2/hadiths`
+
+Query params:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `hadith_text_plain` | string | Search full hadith text (Arabic, normalized) |
+| `rawi_id` | int | Filter by narrator ID |
+| `book` | string | Filter by book name |
+| `topic` | string | Filter by topic tag |
+| `skip` / `limit` | int | Pagination |
+
+**Response**:
+```json
+{
+  "items": [
+    {
+      "id": "<mongo_id>",
+      "hadith_url": "https://bukhari-pedia.net/...",
+      "hadith_indices": [1],
+      "source": "podia",
+      "book": "كتاب بدء الوحي",
+      "chapter": "باب كيف كان بدء الوحي",
+      "hadith_text": "حَدَّثَنَا الْحُمَيْدِيُّ...",
+      "hadith_text_plain": "حدثنا الحميدي...",
+      "sanad_text": "حَدَّثَنَا...",
+      "sanad_text_plain": "حدثنا...",
+      "matn_text": "إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ",
+      "matn_text_plain": "إنما الأعمال بالنيات",
+      "tawabi_text": null,
+      "topics": ["النية", "الأعمال"],
+      "title": "حديث النية",
+      "chains": [
+        {
+          "chain_id": "c1",
+          "type": "primary",
+          "narrators": [
+            {
+              "rawi_id": 1,
+              "name": "البخاري",
+              "name_clean": "البخاري",
+              "name_plain": "البخاري",
+              "role": "lead",
+              "transmission": "حدثنا",
+              "transmission_type": "سماع",
+              "is_explicit_hearing": true
+            }
+          ]
+        }
+      ],
+      "narrators": [
+        { "rawi_id": 822, "name_in_chain": "عمر", "name_in_chain_clean": "عمر", "name_in_chain_plain": "عمر" }
+      ]
+    }
+  ],
+  "total": 7076
+}
+```
+
+#### `GET /api/v2/hadiths/{hadith_index}`
+
+**Response**: Single `PodiaHadith` object. Returns `404` if not found.
+
+---
+
+### v2 — Podia Narrators
+
+#### `GET /api/v2/narrators`
+
+Query params:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `full_name_plain` | string | Search by full name (Arabic, normalized) |
+| `rank` | string | Filter by reliability rank |
+| `skip` / `limit` | int | Pagination |
+
+**Response**:
+```json
+{
+  "items": [
+    {
+      "id": "<mongo_id>",
+      "rawi_id": 822,
+      "name_in_chain": "عُمَرُ",
+      "name_in_chain_clean": "عمر",
+      "name_in_chain_plain": "عمر",
+      "full_name": "عُمَرُ بْنُ الْخَطَّابِ",
+      "full_name_plain": "عمر بن الخطاب",
+      "rank": "صَحَابِيٌّ",
+      "rank_plain": "صحابي",
+      "full_tooltip_info": "..."
+    }
+  ],
+  "total": 1555
+}
+```
+
+#### `GET /api/v2/narrators/{rawi_id}`
+
+**Response**: Single `PodiaNarrator` object. Returns `404` if not found.
+
+#### `GET /api/v2/narrators/{rawi_id}/stats`
+
+**Response**:
+```json
+{
+  "rawi_id": 822,
+  "hadith_count": 45,
+  "teachers": [{ "rawi_id": 100, "name": "النبي ﷺ", "freq": 30 }],
+  "students": [{ "rawi_id": 900, "name": "ابن عمر", "freq": 20 }]
+}
+```
+
+#### `GET /api/v2/narrators/{rawi_id}/tarajem`
+
+**Response**:
+```json
+{
+  "id": "<mongo_id>",
+  "rawi_id": 822,
+  "url": "https://...",
+  "name_in_chain": "عمر",
+  "full_name": "عمر بن الخطاب",
+  "rank": "صحابي",
+  "narrator_info": [
+    { "action": "ولادة", "text": "...", "text_plain": "..." }
+  ],
+  "tarajim": [
+    { "source": "ابن حجر", "tarjama": "...", "tarjama_plain": "..." }
+  ]
+}
+```
+
+---
+
+### v2 — Topics
+
+#### `GET /api/v2/topics`
+
+No params. Returns all distinct topic tags with hadith counts.
+
+**Response**:
+```json
+{
+  "items": [
+    { "topic": "الصلاة", "count": 312 },
+    { "topic": "الزكاة", "count": 89 }
+  ],
+  "total": 47
+}
+```
+
+#### `GET /api/v2/topics/{topic}/hadiths`
+
+Query params: `skip`, `limit`
+
+**Response**: `PaginatedPodiaHadiths` — same shape as `GET /api/v2/hadiths`.
+
+---
+
+### v2 — Al-Rawi Chatbot — requires auth cookie
+
+#### `POST /api/v2/chat`
+
+**Body**:
+```json
+{
+  "question": "ما حكم الصلاة في وقتها؟",
+  "session_id": null,
+  "topic": null,
+  "book": null
+}
+```
+
+- `session_id`: omit or `null` to start a new session; pass a UUID to resume.
+- `topic` / `book`: optional Qdrant payload filters to narrow retrieval scope.
+
+**Response**: `text/event-stream` (SSE). Events in order:
+
+| Event type | Payload | Notes |
+|---|---|---|
+| `assistant_message_start` | `{ "content": "", "session_id": "<uuid>" }` | Always first; carries new `session_id` |
+| `content` | `{ "content": "إنما..." }` | One event per token chunk |
+| `assistant_message_complete` | `{ "data": { "message_type": "assistant", "content": "...", "citations": [...] } }` | Full answer + citations |
+| `thread_rename` | `{ "title": "أول حديث في البخاري" }` | Auto-generated short title |
+| `stream_end` | — | Stream closed |
+
+Citation object:
+```json
+{
+  "resource_id": "<hadith_id>",
+  "text_span": "إنما الأعمال...",
+  "confidence": 0.92,
+  "title": "حديث النية",
+  "hadith_url": "https://..."
+}
+```
+
+Returns `401` if unauthenticated, `429` if daily quota exceeded, `403` if session belongs to another user.
+
+#### `GET /api/v2/chat/sessions`
+
+Query params: `skip`, `limit`
+
+**Response** (metadata only, no messages):
+```json
+[
+  { "session_id": "<uuid>", "title": "أول حديث", "created_at": "...", "message_count": 4 }
+]
+```
+
+#### `GET /api/v2/chat/sessions/{session_id}`
+
+**Response** (full history):
+```json
+{
+  "session_id": "<uuid>",
+  "user_id": "<uuid>",
+  "title": "أول حديث",
+  "created_at": "...",
+  "messages": [
+    { "role": "user", "content": "...", "citations": [], "timestamp": "..." },
+    { "role": "assistant", "content": "...", "citations": [...], "timestamp": "..." }
+  ]
+}
+```
+
+#### `DELETE /api/v2/chat/sessions/{session_id}`
+
+No body. **Response** `204`.
 
 ### Chatbot — user quota (daily limits)
 
@@ -530,11 +916,24 @@ QUOTA_SUPPORTER_DAILY=10
 QUOTA_UNLIMITED_DAILY=-1   # -1 = no limit
 ```
 
+Check current usage via `GET /api/v2/chat/quota` (auth required):
+
+```json
+{ "tier": "free", "limit": 3, "used": 2, "remaining": 1, "resets_at": "2026-04-28T00:00:00Z" }
+```
+
+Call this once on page load and after each chat turn to show a live usage indicator without waiting for a `429`.
+
 To upgrade a user's tier (after a donation), set `tier: "supporter"` directly on their document in `auth_users`:
 
 ```bash
+# Dev
 docker exec -it hadathana-mongo-dev mongosh HadithDataDev
-db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "supporter" } })
+db.auth_users.updateOne({ email: "mahmoud2abdalfattah@gmail.com" }, { $set: { tier: "supporter" } })
+
+# Prod
+docker exec -it hadathana-mongo-prod mongosh HadithData
+db.auth_users.updateOne({ email: "mahmoud2abdalfattah@gmail.com" }, { $set: { tier: "supporter" } })
 ```
 
 ---
