@@ -103,20 +103,50 @@ User Question
 
 ---
 
-## SSE Event Sequence
+## API Reference
 
-Every request emits exactly these events in order:
+### `POST /api/v2/chat`
 
-| # | Event | When | Key fields |
-|---|-------|------|------------|
-| 1 | `assistant_message_start` | Always first | `session_id` (new sessions only) |
-| 2 | `content` | Repeats per token | `content` — append to display |
-| 3 | `assistant_message_complete` | After full generation | `content`, `citations[]` |
-| 4 | `thread_rename` | After complete | `title` (5–7 Arabic words) |
-| 5 | `stream_end` | Always last | — |
-| — | `error` | On exception | `content` — Arabic error message |
+Requires valid JWT session cookie (`fastapiusersauth`). Returns a `text/event-stream` response.
 
-### Citation object
+**Request body** (JSON):
+
+```json
+{
+  "question": "ما حكم الصلاة في وقتها؟",
+  "session_id": null,
+  "topic": null,
+  "book": null
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `question` | string | yes | User's question in Arabic or English |
+| `session_id` | string (UUID) | no | Omit or `null` to start a new session; pass the UUID from a previous `assistant_message_start` event to resume |
+| `topic` | string | no | Optional Qdrant payload filter — restricts retrieval to hadiths with this topic tag |
+| `book` | string | no | Optional Qdrant payload filter — restricts retrieval to hadiths from this book name |
+
+**Error responses** (before any SSE is sent):
+
+| Code | Condition |
+|------|-----------|
+| `401` | Not authenticated |
+| `403` | `session_id` belongs to a different user |
+| `429` | Daily quota exceeded (see quota section below) |
+
+**SSE event stream** — events emitted in this exact order:
+
+| # | Event type | Payload | Notes |
+|---|-----------|---------|-------|
+| 1 | `assistant_message_start` | `{ "type": "assistant_message_start", "content": "", "session_id": "<uuid>" }` | Always first; `session_id` is included only for new sessions |
+| 2 | `content` | `{ "type": "content", "content": "إنما..." }` | One event per token chunk — append to display buffer |
+| 3 | `assistant_message_complete` | `{ "type": "assistant_message_complete", "data": { "message_type": "assistant", "content": "...", "citations": [...] } }` | Full answer text + filtered citations |
+| 4 | `thread_rename` | `{ "type": "thread_rename", "title": "أول حديث في البخاري" }` | Short Arabic conversation title (5–7 words), auto-generated |
+| 5 | `stream_end` | `{ "type": "stream_end" }` | Stream closed — client should stop reading |
+| — | `error` | `{ "type": "error", "content": "حدث خطأ..." }` | Emitted on exception; Arabic error message |
+
+**Citation object** (inside `assistant_message_complete`):
 
 ```json
 {
@@ -130,15 +160,14 @@ Every request emits exactly these events in order:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `resource_id` | string | `hadith_indices[0]` — the internal hadith index. **Use this** to build frontend links. |
+| `resource_id` | string | `hadith_indices[0]` — maps to `GET /api/v2/hadiths/{resource_id}`. **Use this for internal navigation.** |
 | `text_span` | string | First 200 chars of `matn_text_plain` |
 | `confidence` | float | Cohere reranker score, 0.0–1.0 |
 | `title` | string | Short Arabic headline from the hadith `title` field |
-| `hadith_url` | string | External bukhari-pedia.net source URL — **do NOT use for internal navigation** |
+| `hadith_url` | string | External bukhari-pedia.net URL — for display only, **not** for internal routing |
 
-**Frontend integration rule:**
-
-```
+**Frontend integration:**
+```js
 // CORRECT — internal navigation
 <a href={`/hadith/${citation.resource_id}`}>{citation.title}</a>
 
@@ -146,7 +175,95 @@ Every request emits exactly these events in order:
 <a href={citation.hadith_url}>...</a>
 ```
 
-`resource_id` maps to `GET /api/v2/hadiths/{id}` for the full hadith details.
+---
+
+### `GET /api/v2/chat/sessions`
+
+Requires auth. Returns session metadata (no message history).
+
+**Query params**: `skip` (default `0`), `limit` (default `20`, max `100`)
+
+**Response** `200`:
+```json
+[
+  {
+    "session_id": "3f2e1a00-...",
+    "title": "أول حديث في البخاري",
+    "created_at": "2024-01-01T10:00:00Z",
+    "message_count": 4
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | string (UUID) | Pass to `POST /api/v2/chat` to resume |
+| `title` | string | Auto-generated Arabic title (empty string until first `thread_rename`) |
+| `created_at` | datetime | Session creation time (UTC) |
+| `message_count` | int | Total turns (user + assistant combined) |
+
+---
+
+### `GET /api/v2/chat/sessions/{session_id}`
+
+Requires auth. Returns the full session including all messages and citations.
+
+**Response** `200`:
+```json
+{
+  "session_id": "3f2e1a00-...",
+  "user_id": "a1b2c3d4-...",
+  "title": "أول حديث في البخاري",
+  "created_at": "2024-01-01T10:00:00Z",
+  "messages": [
+    {
+      "role": "user",
+      "content": "ما هو أول حديث في صحيح البخاري؟",
+      "citations": [],
+      "timestamp": "2024-01-01T10:00:01Z"
+    },
+    {
+      "role": "assistant",
+      "content": "أول حديث هو حديث النية...",
+      "citations": [
+        {
+          "resource_id": "1",
+          "text_span": "إنما الأعمال بالنيات...",
+          "confidence": 0.97,
+          "title": "حديث النية",
+          "hadith_url": "https://..."
+        }
+      ],
+      "timestamp": "2024-01-01T10:00:05Z"
+    }
+  ]
+}
+```
+
+Returns `403` if the session belongs to a different user, `404` if not found.
+
+---
+
+### `DELETE /api/v2/chat/sessions/{session_id}`
+
+Requires auth. No request body. **Response** `204`.
+
+Returns `403` if the session belongs to a different user.
+
+---
+
+## SSE Event Sequence
+
+Every request emits exactly these events in order:
+
+| # | Event | When | Key fields |
+|---|-------|------|------------|
+| 1 | `assistant_message_start` | Always first | `session_id` (new sessions only) |
+| 2 | `content` | Repeats per token | `content` — append to display |
+| 3 | `assistant_message_complete` | After full generation | `content`, `citations[]` |
+| 4 | `thread_rename` | After complete | `title` (5–7 Arabic words) |
+| 5 | `stream_end` | Always last | — |
+| — | `error` | On exception | `content` — Arabic error message |
 
 ---
 
