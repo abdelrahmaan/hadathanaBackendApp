@@ -42,3 +42,11 @@ class ChatSessionMeta(BaseModel):
     title: str
     created_at: datetime
     message_count: int
+
+
+class QuotaStatus(BaseModel):
+    tier: str        # "free" | "supporter" | "unlimited"
+    limit: int       # daily cap; -1 = unlimited
+    used: int        # requests made today (0 if none yet)
+    remaining: int   # limit - used; -1 if unlimited
+    resets_at: datetime  # UTC midnight tonight — when today's counter expires

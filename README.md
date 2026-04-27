@@ -916,6 +916,14 @@ QUOTA_SUPPORTER_DAILY=10
 QUOTA_UNLIMITED_DAILY=-1   # -1 = no limit
 ```
 
+Check current usage via `GET /api/v2/chat/quota` (auth required):
+
+```json
+{ "tier": "free", "limit": 3, "used": 2, "remaining": 1, "resets_at": "2026-04-28T00:00:00Z" }
+```
+
+Call this once on page load and after each chat turn to show a live usage indicator without waiting for a `429`.
+
 To upgrade a user's tier (after a donation), set `tier: "supporter"` directly on their document in `auth_users`:
 
 ```bash

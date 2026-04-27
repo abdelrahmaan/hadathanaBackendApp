@@ -252,6 +252,36 @@ Returns `403` if the session belongs to a different user.
 
 ---
 
+### `GET /api/v2/chat/quota`
+
+Requires auth. Returns the authenticated user's quota usage for today. No side effects — pure read.
+
+**Response** `200`:
+```json
+{
+  "tier": "free",
+  "limit": 3,
+  "used": 2,
+  "remaining": 1,
+  "resets_at": "2026-04-28T00:00:00Z"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tier` | string | User's plan: `"free"`, `"supporter"`, or `"unlimited"` |
+| `limit` | int | Daily request cap; `-1` = no limit |
+| `used` | int | Requests made today; `0` if none yet |
+| `remaining` | int | `limit - used`; `-1` if unlimited |
+| `resets_at` | datetime | UTC midnight tonight — when today's counter expires |
+
+**Notes:**
+- `used` reflects the count **after** any `POST /api/v2/chat` calls today (counters are incremented atomically before streaming starts)
+- Call this once on page load and after each chat turn to keep the UI indicator fresh
+- Returns `401` if not authenticated
+
+---
+
 ## SSE Event Sequence
 
 Every request emits exactly these events in order:
