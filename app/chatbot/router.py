@@ -19,7 +19,7 @@ from app.chatbot.models import (
     QuotaStatus,
 )
 from app.chatbot.prompts import THREAD_RENAME_PROMPT
-from app.chatbot.quota import check_quota
+from app.chatbot.quota import check_quota, increment_quota
 from app.chatbot.session import append_turn, get_or_create_session, update_session_title
 from app.config import settings
 from app.database import get_client, get_db, get_user_quotas_collection
@@ -205,6 +205,7 @@ async def chat(
         # Persist conversation turn and title to Mongo after stream is fully sent
         await append_turn(db, session, request.question, full_content, citations)
         await update_session_title(db, session.session_id, title)
+        await increment_quota(str(user.id), getattr(user, "tier", "free"))
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

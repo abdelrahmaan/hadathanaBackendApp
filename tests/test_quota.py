@@ -55,7 +55,7 @@ class _quota_patches:
 @pytest.mark.asyncio
 async def test_check_quota_allows_first_request():
     collection = MagicMock()
-    collection.find_one_and_update = AsyncMock(return_value={"request_count": 1})
+    collection.find_one = AsyncMock(return_value=None)  # no prior usage
 
     with _quota_patches(collection):
         await check_quota(_make_user("free"))
@@ -64,7 +64,7 @@ async def test_check_quota_allows_first_request():
 @pytest.mark.asyncio
 async def test_check_quota_allows_request_at_limit():
     collection = MagicMock()
-    collection.find_one_and_update = AsyncMock(return_value={"request_count": 3})
+    collection.find_one = AsyncMock(return_value={"request_count": 2})  # 2 used, limit=3 → allowed
 
     with _quota_patches(collection):
         await check_quota(_make_user("free"))
@@ -73,7 +73,7 @@ async def test_check_quota_allows_request_at_limit():
 @pytest.mark.asyncio
 async def test_check_quota_rejects_request_over_limit():
     collection = MagicMock()
-    collection.find_one_and_update = AsyncMock(return_value={"request_count": 4})
+    collection.find_one = AsyncMock(return_value={"request_count": 3})  # already at limit
 
     with _quota_patches(collection):
         with pytest.raises(HTTPException) as exc_info:
@@ -88,12 +88,12 @@ async def test_check_quota_rejects_request_over_limit():
 @pytest.mark.asyncio
 async def test_check_quota_skips_unlimited_tier():
     collection = MagicMock()
-    collection.find_one_and_update = AsyncMock()
+    collection.find_one = AsyncMock()
 
     with _quota_patches(collection):
         await check_quota(_make_user("unlimited"))
 
-    collection.find_one_and_update.assert_not_called()
+    collection.find_one.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
