@@ -380,7 +380,7 @@ async def test_chat_returns_429_when_daily_quota_exceeded(chat_client):
     with patch(
         "app.chatbot.quota.database.get_user_quotas_collection",
         return_value=MagicMock(
-            find_one_and_update=AsyncMock(return_value={"request_count": 4})
+            find_one=AsyncMock(return_value={"request_count": 3})  # already at limit
         ),
     ):
         response = await chat_client.post(
@@ -391,7 +391,7 @@ async def test_chat_returns_429_when_daily_quota_exceeded(chat_client):
     assert response.status_code == 429
     data = response.json()["detail"]
     assert data["limit"] == 3
-    assert data["used"] == 4
+    assert data["used"] == 3
     assert data["upgrade_hint"] == "supporter"
     assert "لقد وصلت" in data["ar"]
     chat_client.mock_get_session.assert_not_called()

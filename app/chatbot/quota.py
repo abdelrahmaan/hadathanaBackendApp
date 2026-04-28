@@ -1,7 +1,6 @@
 from datetime import date
 
 from fastapi import Depends, HTTPException
-from pymongo import ReturnDocument
 
 from app import database
 from app.auth.config import current_active_user
@@ -19,20 +18,11 @@ async def check_quota(user: User = Depends(current_active_user)) -> None:
     quotas = database.get_user_quotas_collection(
         database.get_db(database.get_client())
     )
-    result = await quotas.find_one_and_update(
-        {"user_id": str(user.id), "usage_date": today.isoformat()},
-        {
-            "$inc": {"request_count": 1},
-            "$setOnInsert": {
-                "tier": tier,
-                "expires_at": database.get_quota_expiry(today),
-            },
-        },
-        upsert=True,
-        return_document=ReturnDocument.AFTER,
+    doc = await quotas.find_one(
+        {"user_id": str(user.id), "usage_date": today.isoformat()}
     )
-    count = int(result["request_count"])
-    if count > limit:
+    count = int(doc["request_count"]) if doc else 0
+    if count >= limit:
         raise HTTPException(
             status_code=429,
             detail={
@@ -42,3 +32,21 @@ async def check_quota(user: User = Depends(current_active_user)) -> None:
                 "upgrade_hint": "supporter",
             },
         )
+
+
+async def increment_quota(user_id: str, tier: str) -> None:
+    today = date.today()
+    quotas = database.get_user_quotas_collection(
+        database.get_db(database.get_client())
+    )
+    await quotas.find_one_and_update(
+        {"user_id": user_id, "usage_date": today.isoformat()},
+        {
+            "$inc": {"request_count": 1},
+            "$setOnInsert": {
+                "tier": tier,
+                "expires_at": database.get_quota_expiry(today),
+            },
+        },
+        upsert=True,
+    )
