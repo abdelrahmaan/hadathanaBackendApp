@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -34,7 +35,10 @@ class Settings(BaseSettings):
     # LangSmith tracing
     langsmith_api_key_prod: str = ""
     langsmith_api_key_dev: str = ""
-    langsmith_project: str = "hadathana_prod"
+    langsmith_project: str = Field(
+        default="hadathana_prod",
+        validation_alias=AliasChoices("LANGSMITH_PROJECT", "LANGSMITH_PROJECT_PROD"),
+    )
     langsmith_project_dev: str = "hadathana_dev"
 
     # Auth (JWT + session)
