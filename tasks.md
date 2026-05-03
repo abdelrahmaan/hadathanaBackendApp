@@ -389,6 +389,16 @@
 
 ## Chore Log
 
+### feat: admin dashboard backend — GET /api/v2/admin/stats (2026-05-03)
+**Status**: done
+**Summary**: Added superuser-only stats endpoint aggregating system health, user/quota breakdown, chatbot activity counts, and data collection sizes into a single JSON response. 3 new files, main.py updated, 4 tests.
+**Touched files**:
+- `app/models/admin.py` (new)
+- `app/routers/admin.py` (new)
+- `app/main.py` (added admin router)
+- `tests/test_admin.py` (new — 4 tests)
+- `tasks.md`
+
 ### test: auth and bookmarks test suite — Tasks 10–14 (2026-04-18)
 **Status**: done
 **Summary**: Wrote full test coverage for auth and bookmarks endpoints. All 40 tests pass; ruff reports no violations.
