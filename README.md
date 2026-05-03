@@ -816,6 +816,12 @@ Query params: `skip`, `limit`
 
 ### Admin — superuser only
 
+Verified on dev on `2026-05-03` against `http://localhost:8001`:
+- `GET /api/v2/admin/stats` returns `401` when unauthenticated, `403` for a regular authenticated user, and `200` for a superuser.
+- `GET /api/v2/admin/users` returns `200` for a superuser with paginated user data.
+- `PATCH /api/v2/admin/users/{user_id}/tier` returns `200` for a superuser and updates the tier as expected.
+- Dev `/health` was reachable during verification; its `degraded` status was caused by an empty `chat_sessions_prod` collection, not by the admin endpoints.
+
 #### `GET /api/v2/admin/stats`
 
 Requires auth cookie + `is_superuser: true`. Returns a single JSON object with system health, user/quota breakdown, chatbot activity, and data collection sizes.
