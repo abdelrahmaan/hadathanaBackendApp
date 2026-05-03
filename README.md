@@ -853,11 +853,42 @@ Requires auth cookie + `is_superuser: true`. Returns a single JSON object with s
 
 Returns `401` if not authenticated, `403` if not superuser.
 
-To grant superuser access (dev):
+To grant superuser access:
 ```bash
+# Dev
 docker exec -it hadathana-mongo-dev mongosh HadithDataDev --eval \
   'db.auth_users.updateOne({email: "you@example.com"}, {$set: {is_superuser: true}})'
+
+# Prod
+docker exec -it hadathana-mongo-prod mongosh HadithData --eval \
+  'db.auth_users.updateOne({email: "you@example.com"}, {$set: {is_superuser: true}})'
 ```
+
+#### `PATCH /api/v2/admin/users/{user_id}/tier`
+
+Upgrade or downgrade a user's tier. Superuser only.
+
+**Path param:** `user_id` — the user's UUID string (from `auth_users.id`)
+
+**Body**:
+```json
+{ "tier": "supporter" }
+```
+
+Valid values: `"free"` · `"supporter"` · `"unlimited"`
+
+**Response** `200`:
+```json
+{
+  "id": "<uuid>",
+  "email": "user@example.com",
+  "tier": "supporter",
+  "is_active": true,
+  "is_superuser": false
+}
+```
+
+Returns `404` if user not found, `422` if tier value is invalid, `403` if not superuser.
 
 ---
 
@@ -1076,6 +1107,11 @@ curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
 
 # Admin stats (superuser only)
 curl -b cookies.txt http://localhost:8000/api/v2/admin/stats | python3 -m json.tool
+
+# Upgrade user tier (superuser only — replace <user_id> with the UUID from auth_users.id)
+curl -b cookies.txt -X PATCH http://localhost:8000/api/v2/admin/users/<user_id>/tier \
+  -H "Content-Type: application/json" \
+  -d '{"tier": "supporter"}'
 
 # Al-Rawi chatbot (SSE stream — requires auth cookie)
 curl -b cookies.txt -s -X POST http://localhost:8000/api/v2/chat \
