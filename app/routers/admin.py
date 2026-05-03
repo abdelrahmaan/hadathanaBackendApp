@@ -21,8 +21,10 @@ from ..models.admin import (
     ChatbotStats,
     DataStats,
     SystemHealth,
+    TierUpdate,
     UsersByTier,
     UserStats,
+    UserTierResponse,
 )
 
 router = APIRouter(prefix="/api/v2/admin", tags=["admin"])
@@ -181,3 +183,29 @@ async def admin_stats(_user: User = Depends(_require_superuser)) -> AdminStats:
     chatbot = await _get_chatbot_stats()
     data = await _get_data_stats()
     return AdminStats(system=system, users=users, chatbot=chatbot, data=data)
+
+
+@router.patch("/users/{user_id}/tier", response_model=UserTierResponse)
+async def update_user_tier(
+    user_id: str,
+    body: TierUpdate,
+    _user: User = Depends(_require_superuser),
+) -> UserTierResponse:
+    db = get_db(get_client())
+    users_col = get_auth_users_collection(db)
+
+    result = await users_col.find_one_and_update(
+        {"id": user_id},
+        {"$set": {"tier": body.tier}},
+        return_document=True,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    return UserTierResponse(
+        id=str(result["id"]),
+        email=result["email"],
+        tier=result["tier"],
+        is_active=result.get("is_active", True),
+        is_superuser=result.get("is_superuser", False),
+    )

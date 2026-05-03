@@ -138,3 +138,78 @@ async def test_admin_stats_shape_with_data(admin_client):
             assert data["data"]["topics"] == 2
         finally:
             app.dependency_overrides.pop(current_active_user, None)
+
+
+@pytest.mark.asyncio
+async def test_update_tier_forbids_regular_user(admin_client):
+    """Regular user cannot update tiers."""
+    from app.auth.config import current_active_user
+    from app.main import app
+
+    app.dependency_overrides[current_active_user] = lambda: make_regular_user()
+    try:
+        response = await admin_client.patch(
+            "/api/v2/admin/users/some-user-id/tier",
+            json={"tier": "supporter"},
+        )
+        assert response.status_code == 403
+    finally:
+        app.dependency_overrides.pop(current_active_user, None)
+
+
+@pytest.mark.asyncio
+async def test_update_tier_returns_404_for_unknown_user(admin_client):
+    """Returns 404 if user_id not found in auth_users."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.auth.config import current_active_user
+    from app.main import app
+
+    mock_col = make_mock_collection()
+    mock_col.find_one_and_update = AsyncMock(return_value=None)
+
+    app.dependency_overrides[current_active_user] = lambda: make_superuser()
+    with patch("app.routers.admin.get_auth_users_collection", return_value=mock_col):
+        try:
+            response = await admin_client.patch(
+                "/api/v2/admin/users/nonexistent-id/tier",
+                json={"tier": "supporter"},
+            )
+            assert response.status_code == 404
+        finally:
+            app.dependency_overrides.pop(current_active_user, None)
+
+
+@pytest.mark.asyncio
+async def test_update_tier_succeeds_for_superuser(admin_client):
+    """Superuser can update a user's tier; returns updated user."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.auth.config import current_active_user
+    from app.main import app
+
+    updated_doc = {
+        "id": "abc-123",
+        "email": "user@example.com",
+        "tier": "supporter",
+        "is_active": True,
+        "is_superuser": False,
+    }
+
+    mock_col = make_mock_collection()
+    mock_col.find_one_and_update = AsyncMock(return_value=updated_doc)
+
+    app.dependency_overrides[current_active_user] = lambda: make_superuser()
+    with patch("app.routers.admin.get_auth_users_collection", return_value=mock_col):
+        try:
+            response = await admin_client.patch(
+                "/api/v2/admin/users/abc-123/tier",
+                json={"tier": "supporter"},
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["tier"] == "supporter"
+            assert data["email"] == "user@example.com"
+            assert data["id"] == "abc-123"
+        finally:
+            app.dependency_overrides.pop(current_active_user, None)

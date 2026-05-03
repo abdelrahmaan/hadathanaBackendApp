@@ -43,3 +43,15 @@ class AdminStats(BaseModel):
     users: UserStats
     chatbot: ChatbotStats
     data: DataStats
+
+
+class TierUpdate(BaseModel):
+    tier: Literal["free", "supporter", "unlimited"]
+
+
+class UserTierResponse(BaseModel):
+    id: str
+    email: str
+    tier: str
+    is_active: bool
+    is_superuser: bool
