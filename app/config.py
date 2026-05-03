@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     quota_supporter_daily: int = 10
     quota_unlimited_daily: int = -1
 
+    # LangSmith tracing
+    langsmith_api_key_prod: str = ""
+    langsmith_api_key_dev: str = ""
+    langsmith_project: str = "hadathana_prod"
+    langsmith_project_dev: str = "hadathana_dev"
+
     # Auth (JWT + session)
     jwt_secret: str = "changeme-generate-with-openssl-rand-hex-32"
     access_token_expire_minutes: int = 15
@@ -68,6 +74,12 @@ class Settings(BaseSettings):
             "supporter": self.quota_supporter_daily,
             "unlimited": self.quota_unlimited_daily,
         }.get(tier, self.quota_free_daily)
+
+    def get_langsmith_api_key(self) -> str:
+        return self.langsmith_api_key_dev if self.is_dev else self.langsmith_api_key_prod
+
+    def get_langsmith_project(self) -> str:
+        return self.langsmith_project_dev if self.is_dev else self.langsmith_project
 
 
 settings = Settings()

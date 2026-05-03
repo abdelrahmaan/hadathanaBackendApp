@@ -1,4 +1,5 @@
 import logging
+import os
 import traceback
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,12 @@ from slowapi.util import get_remote_address
 from .auth.config import auth_backend, fastapi_users
 from .auth.models import UserCreate, UserRead
 from .config import settings
+
+# Wire LangSmith tracing — must happen before any LangChain import
+if settings.get_langsmith_api_key():
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_API_KEY"] = settings.get_langsmith_api_key()
+    os.environ["LANGCHAIN_PROJECT"] = settings.get_langsmith_project()
 from .database import (
     connect,
     disconnect,
