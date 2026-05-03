@@ -35,6 +35,7 @@ if settings.chatbot_enabled:
 from .logging_config import setup_logging
 from .middleware import RequestLoggingMiddleware
 from .routers import (
+    admin,
     bookmarks,
     hadiths_podia,
     hadiths_shamela,
@@ -117,6 +118,7 @@ app.include_router(search_podia.router)
 if settings.chatbot_enabled:
     app.include_router(chatbot_router)
 app.include_router(bookmarks.router)
+app.include_router(admin.router)
 
 Instrumentator().instrument(app).expose(app)
 

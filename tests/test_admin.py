@@ -22,6 +22,11 @@ def make_regular_user():
     return user
 
 
+async def _async_iter(items):
+    for item in items:
+        yield item
+
+
 @pytest_asyncio.fixture
 async def admin_client():
     """AsyncClient with all collections mocked — no live DB or Qdrant needed."""
@@ -29,8 +34,8 @@ async def admin_client():
     mock_db = MagicMock()
     mock_client_obj = MagicMock()
 
-    # MongoDB aggregation returns empty cursor by default
-    mock_col.aggregate.return_value.__aiter__ = AsyncMock(return_value=iter([]))
+    # MongoDB aggregation returns empty async cursor by default
+    mock_col.aggregate = MagicMock(side_effect=lambda *_args, **_kwargs: _async_iter([]))
     mock_col.distinct = AsyncMock(return_value=[])
 
     with (
@@ -120,11 +125,11 @@ async def test_admin_stats_shape_with_data(admin_client):
     # Patch podia hadiths collection at the database module level
     mock_podia = make_mock_collection()
     mock_podia.count_documents = AsyncMock(return_value=7076)
-    mock_podia.aggregate.return_value.__aiter__ = AsyncMock(return_value=iter([]))
+    mock_podia.aggregate = MagicMock(side_effect=lambda *_args, **_kwargs: _async_iter([]))
     mock_podia.distinct = AsyncMock(return_value=["الصلاة", "الصوم"])
 
     app.dependency_overrides[current_active_user] = lambda: make_superuser()
-    with patch("app.database.get_podia_hadiths_collection", return_value=mock_podia):
+    with patch("app.routers.admin.get_podia_hadiths_collection", return_value=mock_podia):
         try:
             response = await admin_client.get("/api/v2/admin/stats")
             assert response.status_code == 200
