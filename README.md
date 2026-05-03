@@ -814,6 +814,53 @@ Query params: `skip`, `limit`
 
 ---
 
+### Admin — superuser only
+
+#### `GET /api/v2/admin/stats`
+
+Requires auth cookie + `is_superuser: true`. Returns a single JSON object with system health, user/quota breakdown, chatbot activity, and data collection sizes.
+
+**Response**:
+```json
+{
+  "system": {
+    "status": "ok",
+    "mongodb": "connected",
+    "qdrant": "connected",
+    "chatbot_enabled": true
+  },
+  "users": {
+    "total": 42,
+    "by_tier": { "free": 38, "supporter": 3, "unlimited": 1 },
+    "quota_used_today": 15,
+    "users_at_limit_today": 2
+  },
+  "chatbot": {
+    "total_sessions": 120,
+    "total_messages": 540,
+    "messages_today": 18,
+    "avg_messages_per_session": 4.5
+  },
+  "data": {
+    "podia_hadiths": 7076,
+    "shamela_hadiths": 7008,
+    "podia_narrators": 1555,
+    "topics": 47,
+    "qdrant_points": 7073
+  }
+}
+```
+
+Returns `401` if not authenticated, `403` if not superuser.
+
+To grant superuser access (dev):
+```bash
+docker exec -it hadathana-mongo-dev mongosh HadithDataDev --eval \
+  'db.auth_users.updateOne({email: "you@example.com"}, {$set: {is_superuser: true}})'
+```
+
+---
+
 ### v2 — Al-Rawi Chatbot — requires auth cookie
 
 #### `POST /api/v2/chat`
@@ -1026,6 +1073,9 @@ curl http://localhost:8000/api/v2/narrators/822/tarajem
 curl http://localhost:8000/api/v2/narrators/822/stats
 curl http://localhost:8000/api/v2/topics
 curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
+
+# Admin stats (superuser only)
+curl -b cookies.txt http://localhost:8000/api/v2/admin/stats | python3 -m json.tool
 
 # Al-Rawi chatbot (SSE stream — requires auth cookie)
 curl -b cookies.txt -s -X POST http://localhost:8000/api/v2/chat \
