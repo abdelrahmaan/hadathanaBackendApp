@@ -20,6 +20,7 @@ from ..models.admin import (
     AdminStats,
     ChatbotStats,
     DataStats,
+    PaginatedUsers,
     SystemHealth,
     TierUpdate,
     UsersByTier,
@@ -209,3 +210,28 @@ async def update_user_tier(
         is_active=result.get("is_active", True),
         is_superuser=result.get("is_superuser", False),
     )
+
+
+@router.get("/users", response_model=PaginatedUsers)
+async def list_users(
+    skip: int = 0,
+    limit: int = 20,
+    _user: User = Depends(_require_superuser),
+) -> PaginatedUsers:
+    db = get_db(get_client())
+    users_col = get_auth_users_collection(db)
+
+    total = await users_col.count_documents({})
+    cursor = users_col.find({}, {"hashed_password": 0}).skip(skip).limit(limit)
+    items = []
+    async for doc in cursor:
+        items.append(
+            UserTierResponse(
+                id=str(doc["id"]),
+                email=doc["email"],
+                tier=doc.get("tier", "free"),
+                is_active=doc.get("is_active", True),
+                is_superuser=doc.get("is_superuser", False),
+            )
+        )
+    return PaginatedUsers(items=items, total=total)

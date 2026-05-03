@@ -213,3 +213,74 @@ async def test_update_tier_succeeds_for_superuser(admin_client):
             assert data["id"] == "abc-123"
         finally:
             app.dependency_overrides.pop(current_active_user, None)
+
+
+@pytest.mark.asyncio
+async def test_list_users_forbids_regular_user(admin_client):
+    """Regular user cannot list users."""
+    from app.auth.config import current_active_user
+    from app.main import app
+
+    app.dependency_overrides[current_active_user] = lambda: make_regular_user()
+    try:
+        response = await admin_client.get("/api/v2/admin/users")
+        assert response.status_code == 403
+    finally:
+        app.dependency_overrides.pop(current_active_user, None)
+
+
+@pytest.mark.asyncio
+async def test_list_users_returns_empty_list(admin_client):
+    """Returns empty list when no users exist."""
+    from app.auth.config import current_active_user
+    from app.main import app
+
+    app.dependency_overrides[current_active_user] = lambda: make_superuser()
+    try:
+        response = await admin_client.get("/api/v2/admin/users")
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+        assert "total" in data
+        assert isinstance(data["items"], list)
+        assert isinstance(data["total"], int)
+    finally:
+        app.dependency_overrides.pop(current_active_user, None)
+
+
+@pytest.mark.asyncio
+async def test_list_users_returns_users(admin_client):
+    """Returns paginated users list with correct shape."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from app.auth.config import current_active_user
+    from app.main import app
+
+    fake_users = [
+        {"id": "uuid-1", "email": "a@example.com", "tier": "free", "is_active": True, "is_superuser": False},
+        {"id": "uuid-2", "email": "b@example.com", "tier": "supporter", "is_active": True, "is_superuser": False},
+    ]
+
+    async def fake_cursor(*args, **kwargs):
+        for u in fake_users:
+            yield u
+
+    mock_col = make_mock_collection()
+    mock_col.count_documents = AsyncMock(return_value=2)
+    mock_find = MagicMock()
+    mock_find.skip.return_value = mock_find
+    mock_find.limit.return_value = mock_find
+    mock_find.__aiter__ = lambda self: fake_cursor()
+    mock_col.find = MagicMock(return_value=mock_find)
+
+    app.dependency_overrides[current_active_user] = lambda: make_superuser()
+    with patch("app.routers.admin.get_auth_users_collection", return_value=mock_col):
+        try:
+            response = await admin_client.get("/api/v2/admin/users?skip=0&limit=20")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["total"] == 2
+            assert len(data["items"]) == 2
+            assert data["items"][0]["email"] == "a@example.com"
+            assert data["items"][1]["tier"] == "supporter"
+        finally:
+            app.dependency_overrides.pop(current_active_user, None)

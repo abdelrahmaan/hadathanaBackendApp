@@ -890,6 +890,37 @@ Valid values: `"free"` · `"supporter"` · `"unlimited"`
 
 Returns `404` if user not found, `422` if tier value is invalid, `403` if not superuser.
 
+#### `GET /api/v2/admin/users`
+
+List users for the admin dashboard. Superuser only.
+
+**Query params:** `skip` (default `0`), `limit` (default `20`)
+
+**Response** `200`:
+```json
+{
+  "items": [
+    {
+      "id": "<uuid>",
+      "email": "user1@example.com",
+      "tier": "free",
+      "is_active": true,
+      "is_superuser": false
+    },
+    {
+      "id": "<uuid>",
+      "email": "user2@example.com",
+      "tier": "supporter",
+      "is_active": true,
+      "is_superuser": false
+    }
+  ],
+  "total": 2
+}
+```
+
+Returns `403` if not superuser.
+
 ---
 
 ### v2 — Al-Rawi Chatbot — requires auth cookie
@@ -1002,16 +1033,16 @@ Check current usage via `GET /api/v2/chat/quota` (auth required):
 
 Call this once on page load and after each chat turn to show a live usage indicator without waiting for a `429`.
 
-To upgrade a user's tier (after a donation), set `tier: "supporter"` directly on their document in `auth_users`:
+To upgrade or downgrade a user's tier after a donation or admin review, use the superuser admin API:
 
 ```bash
-# Dev
-docker exec -it hadathana-mongo-dev mongosh HadithDataDev
-db.auth_users.updateOne({ email: "mahmoud2abdalfattah@gmail.com" }, { $set: { tier: "supporter" } })
+# List users first to get the UUID from auth_users.id
+curl -b cookies.txt "http://localhost:8000/api/v2/admin/users?skip=0&limit=20" | python3 -m json.tool
 
-# Prod
-docker exec -it hadathana-mongo-prod mongosh HadithData
-db.auth_users.updateOne({ email: "mahmoud2abdalfattah@gmail.com" }, { $set: { tier: "supporter" } })
+# Then update the tier (valid values: free, supporter, unlimited)
+curl -b cookies.txt -X PATCH http://localhost:8000/api/v2/admin/users/<user_id>/tier \
+  -H "Content-Type: application/json" \
+  -d '{"tier": "supporter"}'
 ```
 
 ---
@@ -1107,6 +1138,9 @@ curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
 
 # Admin stats (superuser only)
 curl -b cookies.txt http://localhost:8000/api/v2/admin/stats | python3 -m json.tool
+
+# Admin users list (superuser only)
+curl -b cookies.txt "http://localhost:8000/api/v2/admin/users?skip=0&limit=20" | python3 -m json.tool
 
 # Upgrade user tier (superuser only — replace <user_id> with the UUID from auth_users.id)
 curl -b cookies.txt -X PATCH http://localhost:8000/api/v2/admin/users/<user_id>/tier \

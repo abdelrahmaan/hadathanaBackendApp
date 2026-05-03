@@ -55,3 +55,8 @@ class UserTierResponse(BaseModel):
     tier: str
     is_active: bool
     is_superuser: bool
+
+
+class PaginatedUsers(BaseModel):
+    items: list[UserTierResponse]
+    total: int
