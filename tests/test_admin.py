@@ -252,6 +252,7 @@ async def test_list_users_returns_empty_list(admin_client):
 async def test_list_users_returns_users(admin_client):
     """Returns paginated users list with correct shape."""
     from unittest.mock import AsyncMock, MagicMock, patch
+
     from app.auth.config import current_active_user
     from app.main import app
 
