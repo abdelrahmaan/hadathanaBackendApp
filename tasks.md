@@ -389,6 +389,23 @@
 
 ## Chore Log
 
+### test: admin dashboard endpoints on dev (2026-05-03)
+**Status**: done
+**Summary**: Verified the admin dashboard endpoints end to end against the live dev stack on `http://localhost:8001`. Confirmed `GET /api/v2/admin/stats` returns `401` when unauthenticated, `403` for a regular authenticated user, and `200` for a superuser. Confirmed `GET /api/v2/admin/users` returns `200` with paginated data for a superuser, and `PATCH /api/v2/admin/users/{user_id}/tier` returns `200` and updates the tier correctly. Ran `tests/test_admin.py -v` afterward and all 10 tests passed. Dev `/health` was reachable during verification; its `degraded` status was due to an empty `chat_sessions_prod` collection rather than an admin-route failure.
+**Touched files**:
+- `README.md`
+- `tasks.md`
+
+### feat: admin dashboard backend — GET /api/v2/admin/stats (2026-05-03)
+**Status**: done
+**Summary**: Added superuser-only stats endpoint aggregating system health, user/quota breakdown, chatbot activity counts, and data collection sizes into a single JSON response. 3 new files, main.py updated, 4 tests.
+**Touched files**:
+- `app/models/admin.py` (new)
+- `app/routers/admin.py` (new)
+- `app/main.py` (added admin router)
+- `tests/test_admin.py` (new — 4 tests)
+- `tasks.md`
+
 ### test: auth and bookmarks test suite — Tasks 10–14 (2026-04-18)
 **Status**: done
 **Summary**: Wrote full test coverage for auth and bookmarks endpoints. All 40 tests pass; ruff reports no violations.

@@ -1,4 +1,5 @@
 import logging
+import os
 import traceback
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,12 @@ from slowapi.util import get_remote_address
 from .auth.config import auth_backend, fastapi_users
 from .auth.models import UserCreate, UserRead
 from .config import settings
+
+# Wire LangSmith tracing — must happen before any LangChain import
+if settings.get_langsmith_api_key():
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_API_KEY"] = settings.get_langsmith_api_key()
+    os.environ["LANGCHAIN_PROJECT"] = settings.get_langsmith_project()
 from .database import (
     connect,
     disconnect,
@@ -28,6 +35,7 @@ if settings.chatbot_enabled:
 from .logging_config import setup_logging
 from .middleware import RequestLoggingMiddleware
 from .routers import (
+    admin,
     bookmarks,
     hadiths_podia,
     hadiths_shamela,
@@ -110,6 +118,7 @@ app.include_router(search_podia.router)
 if settings.chatbot_enabled:
     app.include_router(chatbot_router)
 app.include_router(bookmarks.router)
+app.include_router(admin.router)
 
 Instrumentator().instrument(app).expose(app)
 

@@ -814,6 +814,121 @@ Query params: `skip`, `limit`
 
 ---
 
+### Admin — superuser only
+
+Verified on dev on `2026-05-03` against `http://localhost:8001`:
+- `GET /api/v2/admin/stats` returns `401` when unauthenticated, `403` for a regular authenticated user, and `200` for a superuser.
+- `GET /api/v2/admin/users` returns `200` for a superuser with paginated user data.
+- `PATCH /api/v2/admin/users/{user_id}/tier` returns `200` for a superuser and updates the tier as expected.
+- Dev `/health` was reachable during verification; its `degraded` status was caused by an empty `chat_sessions_prod` collection, not by the admin endpoints.
+
+#### `GET /api/v2/admin/stats`
+
+Requires auth cookie + `is_superuser: true`. Returns a single JSON object with system health, user/quota breakdown, chatbot activity, and data collection sizes.
+
+**Response**:
+```json
+{
+  "system": {
+    "status": "ok",
+    "mongodb": "connected",
+    "qdrant": "connected",
+    "chatbot_enabled": true
+  },
+  "users": {
+    "total": 42,
+    "by_tier": { "free": 38, "supporter": 3, "unlimited": 1 },
+    "quota_used_today": 15,
+    "users_at_limit_today": 2
+  },
+  "chatbot": {
+    "total_sessions": 120,
+    "total_messages": 540,
+    "messages_today": 18,
+    "avg_messages_per_session": 4.5
+  },
+  "data": {
+    "podia_hadiths": 7076,
+    "shamela_hadiths": 7008,
+    "podia_narrators": 1555,
+    "topics": 47,
+    "qdrant_points": 7073
+  }
+}
+```
+
+Returns `401` if not authenticated, `403` if not superuser.
+
+To grant superuser access:
+```bash
+# Dev
+docker exec -it hadathana-mongo-dev mongosh HadithDataDev --eval \
+  'db.auth_users.updateOne({email: "you@example.com"}, {$set: {is_superuser: true}})'
+
+# Prod
+docker exec -it hadathana-mongo-prod mongosh HadithData --eval \
+  'db.auth_users.updateOne({email: "you@example.com"}, {$set: {is_superuser: true}})'
+```
+
+#### `PATCH /api/v2/admin/users/{user_id}/tier`
+
+Upgrade or downgrade a user's tier. Superuser only.
+
+**Path param:** `user_id` — the user's UUID string (from `auth_users.id`)
+
+**Body**:
+```json
+{ "tier": "supporter" }
+```
+
+Valid values: `"free"` · `"supporter"` · `"unlimited"`
+
+**Response** `200`:
+```json
+{
+  "id": "<uuid>",
+  "email": "user@example.com",
+  "tier": "supporter",
+  "is_active": true,
+  "is_superuser": false
+}
+```
+
+Returns `404` if user not found, `422` if tier value is invalid, `403` if not superuser.
+
+#### `GET /api/v2/admin/users`
+
+List users for the admin dashboard. Superuser only.
+
+**Query params:** `skip` (default `0`), `limit` (default `20`)
+
+**Response** `200`:
+```json
+{
+  "items": [
+    {
+      "id": "<uuid>",
+      "email": "user1@example.com",
+      "tier": "free",
+      "is_active": true,
+      "is_superuser": false
+    },
+    {
+      "id": "<uuid>",
+      "email": "user2@example.com",
+      "tier": "supporter",
+      "is_active": true,
+      "is_superuser": false
+    }
+  ],
+  "total": 2
+}
+```
+
+Returns `403` if not superuser.
+
+---
+
 ### v2 — Al-Rawi Chatbot — requires auth cookie
 
 #### `POST /api/v2/chat`
@@ -902,7 +1017,7 @@ When the limit is reached, the endpoint returns **HTTP 429** before invoking the
   "detail": {
     "ar": "لقد وصلت إلى الحد اليومي. ادعم المشروع للحصول على المزيد.",
     "limit": 3,
-    "used": 4,
+    "used": 3,
     "upgrade_hint": "supporter"
   }
 }
@@ -924,16 +1039,116 @@ Check current usage via `GET /api/v2/chat/quota` (auth required):
 
 Call this once on page load and after each chat turn to show a live usage indicator without waiting for a `429`.
 
-To upgrade a user's tier (after a donation), set `tier: "supporter"` directly on their document in `auth_users`:
+To upgrade or downgrade a user's tier after a donation or admin review, use the superuser admin API:
+
+```bash
+# List users first to get the UUID from auth_users.id
+curl -b cookies.txt "http://localhost:8000/api/v2/admin/users?skip=0&limit=20" | python3 -m json.tool
+
+# Then update the tier (valid values: free, supporter, unlimited)
+curl -b cookies.txt -X PATCH http://localhost:8000/api/v2/admin/users/<user_id>/tier \
+  -H "Content-Type: application/json" \
+  -d '{"tier": "supporter"}'
+
+#### Admin operations
+
+All commands target `auth_users` (user tier) or `user_quotas` (daily counter). Open a shell first:
 
 ```bash
 # Dev
 docker exec -it hadathana-mongo-dev mongosh HadithDataDev
-db.auth_users.updateOne({ email: "mahmoud2abdalfattah@gmail.com" }, { $set: { tier: "supporter" } })
 
 # Prod
 docker exec -it hadathana-mongo-prod mongosh HadithData
-db.auth_users.updateOne({ email: "mahmoud2abdalfattah@gmail.com" }, { $set: { tier: "supporter" } })
+```
+
+**Upgrade a user to supporter** (after a donation):
+```js
+// Dev
+use HadithDataDev
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "supporter" } })
+
+// Prod
+use HadithData
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "supporter" } })
+```
+
+**Downgrade a user back to free:**
+```js
+// Dev
+use HadithDataDev
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "free" } })
+
+// Prod
+use HadithData
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "free" } })
+```
+
+**Grant unlimited access** (admins / special accounts):
+```js
+// Dev
+use HadithDataDev
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "unlimited" } })
+
+// Prod
+use HadithData
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "unlimited" } })
+```
+
+**List all users:**
+```js
+// Dev
+use HadithDataDev
+db.auth_users.find({}, { id: 1, email: 1, tier: 1, is_active: 1, is_verified: 1 }).sort({ email: 1 })
+
+// Prod
+use HadithData
+db.auth_users.find({}, { id: 1, email: 1, tier: 1, is_active: 1, is_verified: 1 }).sort({ email: 1 })
+```
+
+**Check a user's current tier:**
+```js
+// Dev
+use HadithDataDev
+db.auth_users.findOne({ email: "user@example.com" }, { id: 1, email: 1, tier: 1 })
+
+// Prod
+use HadithData
+db.auth_users.findOne({ email: "user@example.com" }, { id: 1, email: 1, tier: 1 })
+```
+
+**Reset a user's quota counter today** (lets them make requests again without waiting for midnight):
+```js
+// Dev
+use HadithDataDev
+db.user_quotas.deleteOne({ user_id: "<user-uuid>", usage_date: new Date().toISOString().slice(0, 10) })
+
+// Prod
+use HadithData
+db.user_quotas.deleteOne({ user_id: "<user-uuid>", usage_date: new Date().toISOString().slice(0, 10) })
+```
+> Find the `user_id` from the tier check above (`id` field).
+
+**Check a user's usage today:**
+```js
+// Dev
+use HadithDataDev
+db.user_quotas.findOne({ user_id: "<user-uuid>", usage_date: new Date().toISOString().slice(0, 10) })
+
+// Prod
+use HadithData
+db.user_quotas.findOne({ user_id: "<user-uuid>", usage_date: new Date().toISOString().slice(0, 10) })
+```
+
+**Reset all quotas for today** (use with care — affects every user):
+```js
+// Dev
+use HadithDataDev
+db.user_quotas.deleteMany({ usage_date: new Date().toISOString().slice(0, 10) })
+
+// Prod
+use HadithData
+db.user_quotas.deleteMany({ usage_date: new Date().toISOString().slice(0, 10) })
 ```
 
 ---
@@ -1026,6 +1241,17 @@ curl http://localhost:8000/api/v2/narrators/822/tarajem
 curl http://localhost:8000/api/v2/narrators/822/stats
 curl http://localhost:8000/api/v2/topics
 curl "http://localhost:8000/api/v2/topics/الصلاة/hadiths"
+
+# Admin stats (superuser only)
+curl -b cookies.txt http://localhost:8000/api/v2/admin/stats | python3 -m json.tool
+
+# Admin users list (superuser only)
+curl -b cookies.txt "http://localhost:8000/api/v2/admin/users?skip=0&limit=20" | python3 -m json.tool
+
+# Upgrade user tier (superuser only — replace <user_id> with the UUID from auth_users.id)
+curl -b cookies.txt -X PATCH http://localhost:8000/api/v2/admin/users/<user_id>/tier \
+  -H "Content-Type: application/json" \
+  -d '{"tier": "supporter"}'
 
 # Al-Rawi chatbot (SSE stream — requires auth cookie)
 curl -b cookies.txt -s -X POST http://localhost:8000/api/v2/chat \
