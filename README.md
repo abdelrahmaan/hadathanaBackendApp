@@ -1011,7 +1011,7 @@ When the limit is reached, the endpoint returns **HTTP 429** before invoking the
   "detail": {
     "ar": "لقد وصلت إلى الحد اليومي. ادعم المشروع للحصول على المزيد.",
     "limit": 3,
-    "used": 4,
+    "used": 3,
     "upgrade_hint": "supporter"
   }
 }
@@ -1043,6 +1043,106 @@ curl -b cookies.txt "http://localhost:8000/api/v2/admin/users?skip=0&limit=20" |
 curl -b cookies.txt -X PATCH http://localhost:8000/api/v2/admin/users/<user_id>/tier \
   -H "Content-Type: application/json" \
   -d '{"tier": "supporter"}'
+
+#### Admin operations
+
+All commands target `auth_users` (user tier) or `user_quotas` (daily counter). Open a shell first:
+
+```bash
+# Dev
+docker exec -it hadathana-mongo-dev mongosh HadithDataDev
+
+# Prod
+docker exec -it hadathana-mongo-prod mongosh HadithData
+```
+
+**Upgrade a user to supporter** (after a donation):
+```js
+// Dev
+use HadithDataDev
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "supporter" } })
+
+// Prod
+use HadithData
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "supporter" } })
+```
+
+**Downgrade a user back to free:**
+```js
+// Dev
+use HadithDataDev
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "free" } })
+
+// Prod
+use HadithData
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "free" } })
+```
+
+**Grant unlimited access** (admins / special accounts):
+```js
+// Dev
+use HadithDataDev
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "unlimited" } })
+
+// Prod
+use HadithData
+db.auth_users.updateOne({ email: "user@example.com" }, { $set: { tier: "unlimited" } })
+```
+
+**List all users:**
+```js
+// Dev
+use HadithDataDev
+db.auth_users.find({}, { id: 1, email: 1, tier: 1, is_active: 1, is_verified: 1 }).sort({ email: 1 })
+
+// Prod
+use HadithData
+db.auth_users.find({}, { id: 1, email: 1, tier: 1, is_active: 1, is_verified: 1 }).sort({ email: 1 })
+```
+
+**Check a user's current tier:**
+```js
+// Dev
+use HadithDataDev
+db.auth_users.findOne({ email: "user@example.com" }, { id: 1, email: 1, tier: 1 })
+
+// Prod
+use HadithData
+db.auth_users.findOne({ email: "user@example.com" }, { id: 1, email: 1, tier: 1 })
+```
+
+**Reset a user's quota counter today** (lets them make requests again without waiting for midnight):
+```js
+// Dev
+use HadithDataDev
+db.user_quotas.deleteOne({ user_id: "<user-uuid>", usage_date: new Date().toISOString().slice(0, 10) })
+
+// Prod
+use HadithData
+db.user_quotas.deleteOne({ user_id: "<user-uuid>", usage_date: new Date().toISOString().slice(0, 10) })
+```
+> Find the `user_id` from the tier check above (`id` field).
+
+**Check a user's usage today:**
+```js
+// Dev
+use HadithDataDev
+db.user_quotas.findOne({ user_id: "<user-uuid>", usage_date: new Date().toISOString().slice(0, 10) })
+
+// Prod
+use HadithData
+db.user_quotas.findOne({ user_id: "<user-uuid>", usage_date: new Date().toISOString().slice(0, 10) })
+```
+
+**Reset all quotas for today** (use with care — affects every user):
+```js
+// Dev
+use HadithDataDev
+db.user_quotas.deleteMany({ usage_date: new Date().toISOString().slice(0, 10) })
+
+// Prod
+use HadithData
+db.user_quotas.deleteMany({ usage_date: new Date().toISOString().slice(0, 10) })
 ```
 
 ---

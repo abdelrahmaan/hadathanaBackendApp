@@ -7,4 +7,4 @@ EMBED_DIM = 1536              # must match matn_embedding stored in Mongo
 RERANK_MODEL = "rerank-multilingual-v3.0"
 RERANK_TOP_N = 5
 FETCH_K = 20              # candidates fetched before reranking
-RELEVANCE_SCORE_THRESHOLD = 0.3  # drop docs below this before showing to LLM
+RELEVANCE_SCORE_THRESHOLD = 0.1  # drop docs below this before showing to LLM
