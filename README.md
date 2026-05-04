@@ -35,7 +35,7 @@ Both dev and prod run on the same VPS using Docker Compose file merging.
 | | Dev | Prod |
 |---|---|---|
 | API port | `8001` | `8000` |
-| MongoDB port | `27017` (exposed) | internal only |
+| MongoDB port | `27017` (exposed) | `27018` (exposed) |
 | Database | `HadithDataDev` | `HadithData` |
 | Volume | `hadathana_mongodb_dev` | `hadathana_mongodb_prod` |
 | Code reload | live (`--reload` + volume mount) | baked into image |
@@ -185,7 +185,7 @@ make dev
 | Service | Dev port | Prod port | Notes |
 |---------|----------|-----------|-------|
 | FastAPI | `8001` | `8000` | Main API |
-| MongoDB | `27017` | internal | Exposed only in dev |
+| MongoDB | `27017` | `27018` | Compass: `mongodb://<host>:27017` (dev) / `mongodb://<host>:27018` (prod) |
 | Prometheus | `9090` | `9091` | Metrics scraper (30-day retention) |
 | Grafana | `3002` | `3001` | Dashboards (login: admin / see `.env`) |
 | Qdrant | `6333` | `6333` | Vector DB — hadiths_matn collection (7,073 vectors) |
@@ -432,8 +432,13 @@ app/chatbot/
 ### Test the chatbot
 
 ```bash
+# Login first to get the access_token cookie
+curl -c cookies.txt -X POST http://localhost:8001/auth/login \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d 'username=user@example.com&password=Str0ngPass!123'
+
 # Smoke test — SSE stream (watch events appear)
-curl -s -X POST http://localhost:8001/api/v2/chat \
+curl -s -b cookies.txt -X POST http://localhost:8001/api/v2/chat \
   -H "Content-Type: application/json" \
   -d '{"question": "ما هو أول حديث في صحيح البخاري؟"}' \
   --no-buffer
@@ -945,6 +950,19 @@ Returns `403` if not superuser.
 
 - `session_id`: omit or `null` to start a new session; pass a UUID to resume.
 - `topic` / `book`: optional Qdrant payload filters to narrow retrieval scope.
+
+Example:
+```bash
+# Login first to get the auth cookie
+curl -c cookies.txt -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d 'username=user@example.com&password=Str0ngPass!123'
+
+# Send a chatbot message (SSE stream)
+curl -N -b cookies.txt -X POST http://localhost:8000/api/v2/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question":"ما معنى حديث إنما الأعمال بالنيات؟"}'
+```
 
 **Response**: `text/event-stream` (SSE). Events in order:
 
