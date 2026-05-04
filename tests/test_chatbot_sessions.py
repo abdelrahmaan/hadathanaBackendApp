@@ -122,7 +122,7 @@ async def _client_context(
             "app.chatbot.router.get_agent",
             return_value=_make_mock_agent(agent_tokens or ["هذا جواب مختصر.\nREFS:[1]"]),
         ),
-        patch("app.chatbot.router._generate_title", new_callable=AsyncMock, return_value=title),
+        patch("app.chatbot.router.generate_title", new_callable=AsyncMock, return_value=title),
         patch("app.chatbot.router.get_last_docs", return_value=citation_docs or []),
     ]
 

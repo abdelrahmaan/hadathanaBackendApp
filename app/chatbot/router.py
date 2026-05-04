@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -6,11 +7,10 @@ from datetime import timezone as tz
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from langchain.chat_models import init_chat_model
 
 from app.auth.config import current_active_user
 from app.auth.models import User
-from app.chatbot.agent import get_agent, get_last_docs
+from app.chatbot.agent import generate_title, get_agent, get_last_docs
 from app.chatbot.models import (
     ChatRequest,
     ChatSession,
@@ -18,7 +18,6 @@ from app.chatbot.models import (
     Citation,
     QuotaStatus,
 )
-from app.chatbot.prompts import THREAD_RENAME_PROMPT
 from app.chatbot.quota import check_quota, increment_quota
 from app.chatbot.session import append_turn, get_or_create_session, update_session_title
 from app.config import settings
@@ -53,22 +52,6 @@ def _extract_token(chunk) -> str:
     if getattr(msg, "tool_call_chunks", None):
         return ""
     return content
-
-
-async def _generate_title(question: str) -> str:
-    """Short non-streaming call to generate a thread title."""
-    try:
-        model = init_chat_model(
-            settings.chatbot_model,
-            model_provider="openai",
-            base_url="https://openrouter.ai/api/v1",
-            api_key=settings.openrouter_api_key,
-        )
-        result = await model.ainvoke(THREAD_RENAME_PROMPT.format(question=question))
-        return (result.content or "").strip()[:60]
-    except Exception as e:
-        logger.warning("title_generation_failed", extra={"event": "title_generation_failed", "error": str(e)})
-        return question[:50]
 
 
 @router.post("/chat")
@@ -109,13 +92,24 @@ async def chat(
             start["session_id"] = session.session_id
         yield _sse(start)
 
+        # Generate title in parallel with the main LLM stream — by the time
+        # the answer finishes, the title is usually already done.
+        title_task = asyncio.create_task(generate_title(request.question))
+
         try:
             logger.info(
                 "pipeline_llm_start",
                 extra={"event": "pipeline_llm_start", "session_id": session.session_id},
             )
+            # Build history: last 3 QA pairs (up to 6 messages) from MongoDB
+            history = [
+                {"role": msg.role, "content": msg.content}
+                for msg in session.messages[-6:]
+            ]
+            input_messages = history + [{"role": "user", "content": request.question}]
+
             async for chunk in agent.astream(
-                {"messages": [{"role": "user", "content": request.question}]},
+                {"messages": input_messages},
                 stream_mode="messages",
                 config={"configurable": {"thread_id": session.session_id}},
             ):
@@ -132,6 +126,7 @@ async def chat(
                 "chat_stream_error",
                 extra={"event": "chat_stream_error", "session_id": session.session_id, "error": str(e)},
             )
+            title_task.cancel()
             yield _sse({"type": "error", "content": "حدث خطأ أثناء المعالجة."})
             yield _sse({"type": "stream_end"})
             return
@@ -194,7 +189,7 @@ async def chat(
             },
         })
 
-        title = await _generate_title(request.question)
+        title = await title_task
         logger.info(
             "pipeline_done",
             extra={"event": "pipeline_done", "session_id": session.session_id, "title": title},
