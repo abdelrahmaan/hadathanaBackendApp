@@ -136,6 +136,12 @@
 
 ## v1.1 - Data Enrichment
 
+- [x] Generate structured Arabic summaries for narrator biographies
+  - Script: `scripts/generate_narrator_summaries.py`
+  - Adds `summary` field to `processed_podia_narrator_biographies` (1,780 narrators)
+  - LLM: `google/gemini-3-flash-preview` via OpenRouter (kunya, era, location, notes)
+  - Structured fields computed from `narrator_info` + `analytics_narrator_stats_podia`
+  - Output: `mongo_migration/processed_bukhari_podia/narrator_summaries.jsonl`
 - [ ] Enrich narrators with biographical data (birth/death dates, places, tabaqah)
 - [ ] Add scholarly assessments (jarh wa ta'dil from multiple sources)
 - [ ] Cross-reference teacher/student relationships with tarajm data

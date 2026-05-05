@@ -10,6 +10,8 @@ from app.chatbot.prompts import ARABIC_SYSTEM_PROMPT, THREAD_RENAME_PROMPT
 from app.chatbot.qdrant import get_qdrant_client
 from app.chatbot.retriever import build_hadiths_retriever
 from app.config import settings
+from langsmith.wrappers import wrap_gemini
+from langsmith import traceable
 
 logger = logging.getLogger("hadathana.chatbot.agent")
 
@@ -33,7 +35,7 @@ def get_last_docs(thread_id: str) -> list:
     """Pop and return docs stashed by the last search_hadiths call for this thread."""
     return _last_docs.pop(thread_id, [])
 
-
+@traceable(name="generate_title", run_type="chain")
 async def generate_title(question: str) -> str:
     """Generate a short Arabic title for a chat thread from the user's first question.
 
@@ -53,13 +55,13 @@ async def generate_title(question: str) -> str:
         )
         return question[:50]
 
-
 def build_agent() -> None:
     global _agent, _retriever, _title_model
 
     _retriever = build_hadiths_retriever(get_qdrant_client())
 
-    @tool
+
+    @traceable(name="hadiths_search", run_type="tool")
     async def search_hadiths(query: str, config: RunnableConfig) -> str:
         """
         Search Sahih al-Bukhari hadiths by meaning.
@@ -105,14 +107,14 @@ def build_agent() -> None:
             for i, d in enumerate(docs)
         )
 
-    model = init_chat_model(
+    model = wrap_gemini(init_chat_model(
         settings.chatbot_model,
         model_provider="openai",
         base_url="https://openrouter.ai/api/v1",
         api_key=settings.openrouter_api_key,
         max_tokens=1000,
         streaming=True,
-    )
+    ))
 
     _agent = create_agent(
         model,
