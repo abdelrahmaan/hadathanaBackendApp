@@ -59,3 +59,19 @@ def test_build_top_relations_fewer_than_n():
 
 def test_build_top_relations_empty():
     assert build_top_relations([], n=5) == []
+
+
+def test_extract_number_arabic_indic():
+    from scripts.generate_narrator_summaries import _extract_number
+    assert _extract_number("عدد أحاديثه: ٢١٤") == 214
+
+
+def test_build_top_relations_missing_keys():
+    malformed = [
+        {"rawi_id": 1, "name": "أحمد", "freq": 10},
+        {"freq": 5},  # missing rawi_id and name — should be skipped
+        {"rawi_id": 2, "name": "محمد", "freq": 3},
+    ]
+    top = build_top_relations(malformed, n=5)
+    assert len(top) == 2
+    assert top[0].rawi_id == 1

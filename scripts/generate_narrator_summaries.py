@@ -91,9 +91,11 @@ class NarratorSummary(BaseModel):
 
 import re as _re
 
+_ARABIC_INDIC_TRANS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
 
 def _extract_number(text: str) -> int:
-    m = _re.search(r"\d+", text)
+    m = _re.search(r"\d+", text.translate(_ARABIC_INDIC_TRANS))
     return int(m.group()) if m else 0
 
 
@@ -122,6 +124,7 @@ def parse_transmission_stats(narrator_info: list[dict]) -> TransmissionStats:
 def build_top_relations(relations: list[dict], n: int = 5) -> list[NarratorRelation]:
     sorted_rel = sorted(relations, key=lambda r: r.get("freq", 0), reverse=True)
     return [
-        NarratorRelation(rawi_id=r["rawi_id"], name=r["name"], freq=r["freq"])
+        NarratorRelation(rawi_id=r["rawi_id"], name=r["name"], freq=r.get("freq", 0))
         for r in sorted_rel[:n]
+        if "rawi_id" in r and "name" in r
     ]
