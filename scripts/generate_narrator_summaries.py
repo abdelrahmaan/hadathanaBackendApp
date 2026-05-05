@@ -43,8 +43,8 @@ from tqdm import tqdm
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_PATH = _REPO_ROOT / "mongo_migration/processed_bukhari_podia/narrator_summaries.jsonl"
 
-LLM_MODEL = "google/gemini-3-flash-preview"
-MAX_RETRIES_LLM = 3
+LLM_MODEL = os.getenv("NARRATOR_SUMMARY_MODEL", "google/gemini-3-flash-preview")
+MAX_LLM_ATTEMPTS = 3
 RETRY_BASE_DELAY = 2.0
 
 # ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ def call_llm(
     full_name: str,
     rank: str,
     tarajim: list[dict],
-    retries: int = MAX_RETRIES_LLM,
+    max_attempts: int = MAX_LLM_ATTEMPTS,
 ) -> LLMExtracted | None:
     tarajim_text = "\n\n".join(
         t.get("tarjama_plain") or t.get("tarjama", "") for t in tarajim
@@ -185,7 +185,8 @@ def call_llm(
     if not tarajim_text:
         return LLMExtracted()  # all None — no text to extract from
 
-    for attempt in range(retries):
+    last_exc = None
+    for attempt in range(max_attempts):
         try:
             return chain.invoke({
                 "full_name": full_name,
@@ -193,10 +194,11 @@ def call_llm(
                 "tarajim_text": tarajim_text,
             })
         except Exception as exc:
-            if attempt == retries - 1:
-                tqdm.write(f"  [LLM ERROR] giving up after {retries} attempts: {exc}")
-                return None
-            delay = RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
-            tqdm.write(f"  [LLM] retry {attempt + 1}/{retries} in {delay:.1f}s — {exc}")
-            time.sleep(delay)
+            last_exc = exc
+            if attempt < max_attempts - 1:
+                delay = RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
+                tqdm.write(f"  [LLM] retry {attempt + 1}/{max_attempts} in {delay:.1f}s — {exc}")
+                time.sleep(delay)
+
+    tqdm.write(f"  [LLM ERROR] giving up after {max_attempts} attempts: {last_exc}")
     return None
