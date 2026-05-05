@@ -28,9 +28,10 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     qdrant_url: str = "http://qdrant:6333"
     chatbot_model: str = "google/gemini-3-flash-preview"
+    title_model: str = "google/gemini-3-flash-preview"
     quota_free_daily: int = 3
-    quota_supporter_daily: int = 10
-    quota_unlimited_daily: int = -1
+    quota_supporter_daily: int = 20
+    quota_unlimited_daily: int = 50
 
     # LangSmith tracing
     langsmith_api_key_prod: str = ""

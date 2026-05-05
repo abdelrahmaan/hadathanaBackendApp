@@ -122,8 +122,9 @@ def build_agent() -> None:
 
     # Plain chat model for short utility calls (titles, etc.) — not an agent.
     _title_model = init_chat_model(
-        settings.chatbot_model,
+        settings.title_model,
         model_provider="openai",
+        max_tokens=50,
         base_url="https://openrouter.ai/api/v1",
         api_key=settings.openrouter_api_key,
     )
