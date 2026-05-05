@@ -235,3 +235,139 @@ def assemble_summary(
         tarajim_sources=[t["source"] for t in tarajim if t.get("source")],
         notes=llm_result.notes,
     )
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Generate structured Arabic summaries for narrator biographies.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    p.add_argument("--force", action="store_true",
+                   help="Re-generate summaries even if summary field already exists.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Count pending narrators and exit without writing.")
+    p.add_argument("--limit", type=int, default=0,
+                   help="Process at most N narrators (0 = all). Useful for smoke tests.")
+    p.add_argument("--db", type=str, default="HadithDataDev",
+                   help="MongoDB database name (default: HadithDataDev).")
+    p.add_argument("--uri", type=str, default="mongodb://localhost:27017/",
+                   help="MongoDB URI (default: mongodb://localhost:27017/).")
+    return p.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    args = parse_args()
+
+    load_dotenv(_REPO_ROOT / ".env")
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not openrouter_key and not args.dry_run:
+        sys.exit("ERROR: OPENROUTER_API_KEY not set in .env")
+
+    client = MongoClient(args.uri)
+    db = client[args.db]
+    bio_col = db["processed_podia_narrator_biographies"]
+    stats_col = db["analytics_narrator_stats_podia"]
+
+    print(f"DB     : {args.db} @ {args.uri}")
+    print(f"Output : {OUTPUT_PATH}")
+
+    # Build lookup: rawi_id -> stats doc
+    stats_by_id: dict[int, dict] = {}
+    for doc in stats_col.find({}, {"_id": 0}):
+        rid = doc.get("rawi_id")
+        if rid is not None:
+            stats_by_id[int(rid)] = doc
+
+    # Build pending list
+    query = {} if args.force else {"summary": {"$exists": False}}
+    total_docs = bio_col.count_documents({})
+    pending_docs = list(bio_col.find(query, {"_id": 0}))
+
+    if args.limit > 0:
+        pending_docs = pending_docs[: args.limit]
+
+    print(f"Total narrators : {total_docs:,}")
+    print(f"Pending         : {len(pending_docs):,}")
+
+    if args.dry_run:
+        print("\n[dry-run] No changes made.")
+        client.close()
+        return
+
+    if not pending_docs:
+        print("All narrators already have summaries.")
+        client.close()
+        return
+
+    llm_chain = build_llm_chain(openrouter_key)
+
+    n_ok = 0
+    n_skipped = 0
+    n_failed = 0
+    ops: list[UpdateOne] = []
+
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    out_file = open(OUTPUT_PATH, "a", encoding="utf-8")
+
+    try:
+        for bio_doc in tqdm(pending_docs, unit="narrator", desc="Generating summaries"):
+            rawi_id = bio_doc.get("rawi_id")
+            if rawi_id is None:
+                n_skipped += 1
+                continue
+
+            stats_doc = stats_by_id.get(int(rawi_id))
+
+            llm_result = call_llm(
+                llm_chain,
+                full_name=bio_doc.get("full_name", ""),
+                rank=bio_doc.get("rank", ""),
+                tarajim=bio_doc.get("tarajim", []),
+            )
+
+            summary = assemble_summary(bio_doc, stats_doc, llm_result)
+            if summary is None:
+                tqdm.write(f"  [SKIP] rawi_id={rawi_id}: LLM failed")
+                n_failed += 1
+                continue
+
+            summary_dict = summary.model_dump()
+            ops.append(UpdateOne({"rawi_id": rawi_id}, {"$set": {"summary": summary_dict}}))
+
+            row = {"rawi_id": rawi_id, "summary": summary_dict}
+            out_file.write(json.dumps(row, ensure_ascii=False) + "\n")
+            out_file.flush()
+
+            n_ok += 1
+
+            # Flush bulk write every 50 to avoid large batches
+            if len(ops) >= 50:
+                bio_col.bulk_write(ops, ordered=False)
+                ops = []
+
+        if ops:
+            bio_col.bulk_write(ops, ordered=False)
+
+    finally:
+        out_file.close()
+        client.close()
+
+    print(f"\n{'='*60}")
+    print(f"  Generated : {n_ok:,}")
+    print(f"  Skipped   : {n_skipped:,}  (missing rawi_id)")
+    print(f"  Failed    : {n_failed:,}  (LLM error — re-run to retry)")
+    print(f"  Output    : {OUTPUT_PATH}")
+    print(f"{'='*60}")
+
+
+if __name__ == "__main__":
+    main()
