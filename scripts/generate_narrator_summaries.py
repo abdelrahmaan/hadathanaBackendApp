@@ -202,3 +202,36 @@ def call_llm(
 
     tqdm.write(f"  [LLM ERROR] giving up after {max_attempts} attempts: {last_exc}")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Assembly
+# ---------------------------------------------------------------------------
+
+def assemble_summary(
+    bio_doc: dict,
+    stats_doc: dict | None,
+    llm_result: LLMExtracted | None,
+) -> NarratorSummary | None:
+    if llm_result is None:
+        return None
+
+    narrator_info = bio_doc.get("narrator_info", [])
+    tarajim = bio_doc.get("tarajim", [])
+
+    teachers = stats_doc.get("teachers", []) if stats_doc else []
+    students = stats_doc.get("students", []) if stats_doc else []
+
+    return NarratorSummary(
+        full_name=bio_doc.get("full_name", ""),
+        kunya=llm_result.kunya,
+        era=llm_result.era,
+        location=llm_result.location,
+        classification=bio_doc.get("rank", ""),
+        hadith_count=parse_hadith_count(narrator_info),
+        transmission_stats=parse_transmission_stats(narrator_info),
+        top_teachers=build_top_relations(teachers, n=5),
+        top_students=build_top_relations(students, n=5),
+        tarajim_sources=[t["source"] for t in tarajim if t.get("source")],
+        notes=llm_result.notes,
+    )

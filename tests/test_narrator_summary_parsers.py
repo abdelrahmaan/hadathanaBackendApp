@@ -75,3 +75,73 @@ def test_build_top_relations_missing_keys():
     top = build_top_relations(malformed, n=5)
     assert len(top) == 2
     assert top[0].rawi_id == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests for assemble_summary
+# ---------------------------------------------------------------------------
+
+from scripts.generate_narrator_summaries import (
+    assemble_summary,
+    LLMExtracted,
+    NarratorSummary,
+)
+
+BIO_DOC_520 = {
+    "rawi_id": 520,
+    "full_name": "سَعِيد بن المُسَيَّب",
+    "rank": "أحدُ العلماء الأثبات الفقهاء الكبار",
+    "narrator_info": NARRATOR_INFO_520,
+    "tarajim": [
+        {"source": "الجرح والتعديل", "tarjama": "...", "tarjama_plain": "..."},
+    ],
+}
+
+STATS_DOC_520 = {
+    "rawi_id": 520,
+    "hadith_count": 199,
+    "teachers": TEACHERS_520,
+    "students": [
+        {"rawi_id": 1398, "name": "الزُّهْرِيِّ", "freq": 164},
+        {"rawi_id": 46,   "name": "الزُّهْرِيِّ", "freq": 6},
+    ],
+}
+
+LLM_RESULT_520 = LLMExtracted(
+    kunya="أبو محمد",
+    era="القرن 1 هـ",
+    location="المدينة المنورة",
+    notes="وثّقه الأئمة وعدّوه من أفقه التابعين.",
+)
+
+
+def test_assemble_summary_full():
+    summary = assemble_summary(BIO_DOC_520, STATS_DOC_520, LLM_RESULT_520)
+    assert isinstance(summary, NarratorSummary)
+    assert summary.full_name == "سَعِيد بن المُسَيَّب"
+    assert summary.kunya == "أبو محمد"
+    assert summary.era == "القرن 1 هـ"
+    assert summary.location == "المدينة المنورة"
+    assert summary.classification == "أحدُ العلماء الأثبات الفقهاء الكبار"
+    assert summary.hadith_count == 214          # from narrator_info, not stats
+    assert summary.transmission_stats.total == 281
+    assert summary.transmission_stats.connected == 226
+    assert summary.transmission_stats.suspended == 49
+    assert summary.transmission_stats.disputed == 3
+    assert len(summary.top_teachers) == 5
+    assert summary.top_teachers[0].rawi_id == 1794
+    assert len(summary.top_students) == 2       # only 2 students available
+    assert summary.tarajim_sources == ["الجرح والتعديل"]
+    assert summary.notes == "وثّقه الأئمة وعدّوه من أفقه التابعين."
+
+
+def test_assemble_summary_no_stats():
+    summary = assemble_summary(BIO_DOC_520, None, LLM_RESULT_520)
+    assert summary.top_teachers == []
+    assert summary.top_students == []
+    assert summary.hadith_count == 214  # falls back to narrator_info
+
+
+def test_assemble_summary_llm_none():
+    summary = assemble_summary(BIO_DOC_520, STATS_DOC_520, None)
+    assert summary is None
