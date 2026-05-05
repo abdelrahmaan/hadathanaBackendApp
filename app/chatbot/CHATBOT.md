@@ -39,6 +39,14 @@ User Question
       │
       ▼
 ┌─────────────────────────────────────────┐
+│        MongoDB History Seeding          │
+│  session.messages[-6:] loaded from DB   │
+│  (last 3 QA pairs — durable across      │
+│   server restarts, no InMemorySaver)    │
+└──────────────────┬──────────────────────┘
+                   │
+                   ▼  history + current question
+┌─────────────────────────────────────────┐
 │           SYSTEM PROMPT                 │
 │  (ARABIC_SYSTEM_PROMPT from prompts.py) │
 │  • Answer ONLY from tool results        │
@@ -427,8 +435,11 @@ The tool stashes retrieved `Document` objects in a module-level dict keyed by `t
 **Why `embed-v4.0` not `embed-multilingual-v3.0`?**
 The stored `matn_embedding` vectors in MongoDB were generated with `embed-v4.0` (1536-dim). The embedding model at query time must match the stored vectors exactly. `embed-multilingual-v3.0` is 1024-dim and would cause a dimension mismatch error.
 
-**Why `InMemorySaver` for session memory?**
-`create_agent` is called with a module-level `InMemorySaver` checkpointer. Each request passes `thread_id = session.session_id` in the LangChain config — the agent accumulates conversation history per thread automatically. `InMemorySaver` is in-process; swap to `langgraph-checkpoint-redis` for multi-replica prod without changing any agent code.
+**Why MongoDB history seeding instead of `InMemorySaver`?**
+The agent is stateless — no checkpointer. On every request, `router.py` loads `session.messages[-6:]` (last 3 QA pairs) from MongoDB and prepends them to the `agent.astream()` input as explicit messages. This makes memory durable across server restarts and container redeploys: the agent always sees the prior conversation regardless of whether the process was restarted. An `InMemorySaver` would silently lose history on every restart, which is unacceptable in prod. The empty-list slice `[][-6:]` returns `[]`, so new sessions work identically with zero prior context.
+
+**Why `init_chat_model` (not `create_agent`) for title generation?**
+`create_agent` is reserved for the main orchestrator only. Title generation is a one-shot utility call — no tools, no conversation state, no streaming — so it uses a plain `init_chat_model` singleton (`_title_model` in `agent.py`). This singleton is initialised once in `build_agent()` and reused across requests, avoiding per-request model instantiation overhead. Generation is launched as `asyncio.create_task()` at the start of streaming so it runs concurrently with LLM token output and adds zero perceived latency.
 
 **Why Rule 0 (greeting guard) in the system prompt?**
 Without it, the LLM treats every input as potentially Islamic and calls `search_hadiths` on greetings ("مرحبا", "hi"), returning irrelevant citations. Rule 0 explicitly carves out small-talk: respond naturally, no tool call. This is simpler and zero-cost compared to a pre-classification LLM call.
