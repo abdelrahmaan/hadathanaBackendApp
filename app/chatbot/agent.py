@@ -45,7 +45,7 @@ async def generate_title(question: str) -> str:
         return question[:50]
     try:
         result = await _title_model.ainvoke(THREAD_RENAME_PROMPT.format(question=question))
-        return (result.content or "").strip()[:60] or question[:50]
+        return result.content
     except Exception as e:
         logger.warning(
             "title_generation_failed",
@@ -116,6 +116,7 @@ def build_agent() -> None:
     _agent = create_agent(
         model,
         [search_hadiths],
+        max_tokens=750,
         system_prompt=ARABIC_SYSTEM_PROMPT,
     )
 
