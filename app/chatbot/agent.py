@@ -110,13 +110,13 @@ def build_agent() -> None:
         model_provider="openai",
         base_url="https://openrouter.ai/api/v1",
         api_key=settings.openrouter_api_key,
+        max_tokens=1000,
         streaming=True,
     )
 
     _agent = create_agent(
         model,
         [search_hadiths],
-        max_tokens=750,
         system_prompt=ARABIC_SYSTEM_PROMPT,
     )
 
