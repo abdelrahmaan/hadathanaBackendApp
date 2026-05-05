@@ -128,3 +128,75 @@ def build_top_relations(relations: list[dict], n: int = 5) -> list[NarratorRelat
         for r in sorted_rel[:n]
         if "rawi_id" in r and "name" in r
     ]
+
+
+# ---------------------------------------------------------------------------
+# LLM chain
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROMPT = (
+    "أنت باحث متخصص في علم الرجال وعلم الحديث النبوي. "
+    "مهمتك استخراج معلومات دقيقة عن رواة صحيح البخاري من نصوص التراجم المقدَّمة إليك."
+)
+
+_HUMAN_TEMPLATE = """\
+فيما يلي معلومات عن راوٍ من رواة صحيح البخاري.
+
+الاسم: {full_name}
+الرتبة: {rank}
+
+التراجم:
+{tarajim_text}
+
+استخرج المعلومات التالية باللغة العربية الفصحى:
+- kunya: الكنية (مثل: أبو محمد) — اترك الحقل فارغاً إذا لم تُذكر
+- era: العصر (مثل: القرن 1 هـ) — اترك الحقل فارغاً إذا لم يُذكر
+- location: المدينة أو البلد (مثل: المدينة المنورة) — اترك الحقل فارغاً إذا لم يُذكر
+- notes: فقرة موجزة (3-5 جمل) تلخّص أبرز ما قاله العلماء في هذا الراوي من توثيق أو تجريح أو مزايا علمية.\
+  إذا لم تتوفر تراجم فاترك الحقل فارغاً.
+"""
+
+
+def build_llm_chain(openrouter_key: str):
+    llm = ChatOpenAI(
+        model=LLM_MODEL,
+        base_url="https://openrouter.ai/api/v1",
+        api_key=openrouter_key,
+        temperature=0.0,
+    )
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _SYSTEM_PROMPT),
+        ("human", _HUMAN_TEMPLATE),
+    ])
+    return prompt | llm.with_structured_output(LLMExtracted)
+
+
+def call_llm(
+    chain,
+    full_name: str,
+    rank: str,
+    tarajim: list[dict],
+    retries: int = MAX_RETRIES_LLM,
+) -> LLMExtracted | None:
+    tarajim_text = "\n\n".join(
+        t.get("tarjama_plain") or t.get("tarjama", "") for t in tarajim
+    ).strip()
+
+    if not tarajim_text:
+        return LLMExtracted()  # all None — no text to extract from
+
+    for attempt in range(retries):
+        try:
+            return chain.invoke({
+                "full_name": full_name,
+                "rank": rank,
+                "tarajim_text": tarajim_text,
+            })
+        except Exception as exc:
+            if attempt == retries - 1:
+                tqdm.write(f"  [LLM ERROR] giving up after {retries} attempts: {exc}")
+                return None
+            delay = RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
+            tqdm.write(f"  [LLM] retry {attempt + 1}/{retries} in {delay:.1f}s — {exc}")
+            time.sleep(delay)
+    return None
