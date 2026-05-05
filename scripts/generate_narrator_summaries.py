@@ -83,3 +83,45 @@ class NarratorSummary(BaseModel):
     top_students: list[NarratorRelation]
     tarajim_sources: list[str]
     notes: str | None
+
+
+# ---------------------------------------------------------------------------
+# Structured-field parsers (no LLM, no DB)
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+def _extract_number(text: str) -> int:
+    m = _re.search(r"\d+", text)
+    return int(m.group()) if m else 0
+
+
+def parse_hadith_count(narrator_info: list[dict]) -> int:
+    for entry in narrator_info:
+        if entry.get("action") == "get_matn_entries":
+            return _extract_number(entry.get("text", ""))
+    return 0
+
+
+def parse_transmission_stats(narrator_info: list[dict]) -> TransmissionStats:
+    mapping = {
+        "get_esnad_entries":       "total",
+        "get_esnad_mt_entries":    "connected",
+        "get_esnad_kht_entries":   "suspended",
+        "get_esnad_shk_entries":   "disputed",
+    }
+    values: dict[str, int] = {k: 0 for k in mapping.values()}
+    for entry in narrator_info:
+        key = mapping.get(entry.get("action", ""))
+        if key:
+            values[key] = _extract_number(entry.get("text", ""))
+    return TransmissionStats(**values)
+
+
+def build_top_relations(relations: list[dict], n: int = 5) -> list[NarratorRelation]:
+    sorted_rel = sorted(relations, key=lambda r: r.get("freq", 0), reverse=True)
+    return [
+        NarratorRelation(rawi_id=r["rawi_id"], name=r["name"], freq=r["freq"])
+        for r in sorted_rel[:n]
+    ]
