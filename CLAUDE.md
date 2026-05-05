@@ -115,7 +115,7 @@ The project uses Docker Compose with file merging to run **dev and prod simultan
 | Service | Dev | Prod |
 |---------|-----|------|
 | API port | 8001 | 8000 |
-| MongoDB port | 27017 (exposed) | internal only |
+| MongoDB port | 27017 (exposed) | 27018 (exposed) |
 | Prometheus port | 9090 | 9091 |
 | Grafana port | 3002 | 3001 |
 | Qdrant port | 6333 (dev only) | — |
@@ -160,6 +160,15 @@ docker exec -it hadathana-mongo-dev mongosh HadithDataDev
 docker exec -it hadathana-api-prod sh
 docker exec -it hadathana-mongo-prod mongosh HadithData
 ```
+
+#### Connect from MongoDB Compass
+
+```
+mongodb://<host>:27017   → HadithDataDev (dev)
+mongodb://<host>:27018   → HadithData    (prod)
+```
+
+`<host>` is `localhost` if running on the same machine, otherwise the VPS IP (e.g. `72.60.222.229`). Both ports are exposed without auth — for remote access prefer SSH tunneling (`ssh -L 27018:localhost:27018 user@host`) over opening the port publicly.
 
 #### What happens on startup
 

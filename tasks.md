@@ -327,7 +327,7 @@
 - [x] **Fix double retrieval** — tool stashes docs in `_last_docs[thread_id]`; router uses `get_last_docs()` after stream. Saves ~500ms, citation scores now use LLM-refined query (higher).
   - Files: `app/chatbot/router.py`, `app/chatbot/agent.py`
 
-- [x] **Stateful multi-turn memory** — `InMemorySaver` checkpointer added to `create_agent`; `thread_id = session.session_id` passed in every `astream` call. Agent now remembers conversation history within a session.
+- [x] **Stateful multi-turn memory** — Initially backed by `InMemorySaver` checkpointer, but that reset on every server restart. **Superseded** by MongoDB-seeded history: each request now reconstructs the last 3 QA pairs from `session.messages` and prepends them to `agent.astream()` input. `InMemorySaver` removed entirely. Memory now durable across restarts.
   - Files: `app/chatbot/agent.py`, `app/chatbot/router.py`
 
 - [x] **Greeting guard (Rule 0)** — added Rule 0 to system prompt: greetings and small-talk bypass `search_hadiths` entirely. LLM responds naturally with no citations.
@@ -338,6 +338,10 @@
 
 - [x] **Relevance score filtering** — Pre-filter retrieved docs below `RELEVANCE_SCORE_THRESHOLD` (0.3) before passing to LLM. Include reranker scores in tool output so LLM can judge borderline passages. Updated prompt Rules 2 and 4 to instruct score-aware citation behavior.
   - Files: `app/chatbot/config.py`, `app/chatbot/agent.py`, `app/chatbot/prompts.py`
+
+- [x] **Memory durability + async retriever + parallel title generation + error handling** — replaced `InMemorySaver` (lost on every server restart) with explicit history seeding from MongoDB (`session.messages[-6:]` = last 3 QA pairs) so memory survives restarts; switched `search_hadiths` to `async def` + `await _retriever.ainvoke()` to stop blocking the event loop; wrapped retrieval in try/except returning a graceful Arabic fallback message; moved title generation to a module-level `_title_model` singleton (no more per-request `init_chat_model()`) and kicked it off via `asyncio.create_task()` in parallel with the main stream so the title is usually ready by the time streaming completes; reserved `create_agent()` for the main orchestrator only.
+  - Files: `app/chatbot/agent.py`, `app/chatbot/router.py`, `tests/test_chatbot_v1.py`, `tests/test_chatbot_sessions.py`
+  - Plan: `docs/plan_chatbot_enhancement.md`
 
 - [ ] **Guardrail middleware** — wrap `create_agent` with `ToolCallLimitMiddleware(max_tool_calls=3)` to prevent runaway tool loops on ambiguous questions.
   - Files: `app/chatbot/agent.py`
@@ -350,8 +354,8 @@
 - [ ] **`search_narrators` tool (V2)** — second Qdrant collection `narrators_bio` for narrator biographies (`processed_podia_narrator_biographies`, 1,780 docs). Agent picks the right tool based on question type (hadith content vs. narrator info).
   - Files: `app/chatbot/agent.py`, `app/chatbot/retriever.py`, `scripts/embed_narrators.py` (new)
 
-- [ ] **Swap `InMemorySaver` → Redis for prod** — current in-memory state is lost on API restart. Redis checkpoint persists across deploys with identical interface.
-  - Files: `app/chatbot/agent.py`, `docker-compose.prod.yml`, `requirements.txt`
+- [x] **Swap `InMemorySaver` → durable storage** — Solved by removing `InMemorySaver` entirely and seeding the agent from MongoDB-stored `session.messages` on every request. No Redis needed; MongoDB is already the session-of-truth.
+  - Files: `app/chatbot/agent.py`, `app/chatbot/router.py`
 
 ### Lower Priority
 
@@ -388,6 +392,14 @@
 ---
 
 ## Chore Log
+
+### docs: document prod MongoDB port 27018 + Compass connection (2026-05-04)
+**Status**: done
+**Summary**: Updated docs to reflect that prod MongoDB exposes port `27018` on the host (not "internal only" as previously documented). Added a Compass connection block in `CLAUDE.md` covering both dev (`27017`) and prod (`27018`) URIs, with a note recommending SSH tunneling over public exposure for remote access.
+**Touched files**:
+- `README.md` (Environments table + Services and Ports table)
+- `CLAUDE.md` (Environment allocation table + new "Connect from MongoDB Compass" section)
+- `tasks.md`
 
 ### test: admin dashboard endpoints on dev (2026-05-03)
 **Status**: done

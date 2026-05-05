@@ -119,7 +119,7 @@ async def chat_client():
         # Patch in the router's namespace (where the names are actually used)
         patch("app.chatbot.router.get_agent", return_value=mock_agent),
         patch("app.chatbot.agent.get_retriever", return_value=mock_retriever),
-        patch("app.chatbot.router._generate_title", new_callable=AsyncMock, return_value="النية في الأعمال"),
+        patch("app.chatbot.router.generate_title", new_callable=AsyncMock, return_value="النية في الأعمال"),
         patch("app.chatbot.router.get_or_create_session", new_callable=AsyncMock) as mock_get_session,
         patch("app.chatbot.router.append_turn", new_callable=AsyncMock) as mock_append,
     ):
