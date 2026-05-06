@@ -72,9 +72,15 @@ async def get_user_manager(
 # Transport: HttpOnly cookie
 # ------------------------------------------------------------------
 
+_token_lifetime_minutes = (
+    settings.access_token_expire_minutes_dev
+    if settings.is_dev
+    else settings.access_token_expire_minutes
+)
+
 cookie_transport = CookieTransport(
     cookie_name="access_token",
-    cookie_max_age=settings.access_token_expire_minutes * 60,
+    cookie_max_age=_token_lifetime_minutes * 60,
     cookie_secure=not settings.is_dev,
     cookie_httponly=True,
     cookie_samesite="lax",
@@ -88,7 +94,7 @@ cookie_transport = CookieTransport(
 def get_jwt_strategy() -> JWTStrategy:
     return JWTStrategy(
         secret=SECRET,
-        lifetime_seconds=settings.access_token_expire_minutes * 60,
+        lifetime_seconds=_token_lifetime_minutes * 60,
     )
 
 

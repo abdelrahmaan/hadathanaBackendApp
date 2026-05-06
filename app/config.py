@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     quota_free_daily: int = 3
     quota_supporter_daily: int = 20
     quota_unlimited_daily: int = 50
+    # Set to -1 in dev .env to bypass quota checks during local testing
+    quota_dev_override: int = -1
 
     # LangSmith tracing
     langsmith_api_key_prod: str = ""
@@ -45,6 +47,8 @@ class Settings(BaseSettings):
     # Auth (JWT + session)
     jwt_secret: str = "changeme-generate-with-openssl-rand-hex-32"
     access_token_expire_minutes: int = 15
+    # Override in dev .env to keep local sessions alive across restarts
+    access_token_expire_minutes_dev: int = 10080  # 7 days
     refresh_token_expire_days: int = 30
     reset_token_expire_minutes: int = 30
 
@@ -74,6 +78,8 @@ class Settings(BaseSettings):
         return [o.strip() for o in raw.split(",") if o.strip()]
 
     def get_daily_limit(self, tier: str) -> int:
+        if self.is_dev and self.quota_dev_override == -1:
+            return -1
         return {
             "free": self.quota_free_daily,
             "supporter": self.quota_supporter_daily,
