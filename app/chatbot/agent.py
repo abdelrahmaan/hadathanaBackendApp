@@ -10,7 +10,6 @@ from app.chatbot.prompts import ARABIC_SYSTEM_PROMPT, THREAD_RENAME_PROMPT
 from app.chatbot.qdrant import get_qdrant_client
 from app.chatbot.retriever import build_hadiths_retriever
 from app.config import settings
-from langsmith.wrappers import wrap_gemini
 from langsmith import traceable
 
 logger = logging.getLogger("hadathana.chatbot.agent")
@@ -107,14 +106,14 @@ def build_agent() -> None:
             for i, d in enumerate(docs)
         )
 
-    model = wrap_gemini(init_chat_model(
+    model = init_chat_model(
         settings.chatbot_model,
         model_provider="openai",
         base_url="https://openrouter.ai/api/v1",
         api_key=settings.openrouter_api_key,
         max_tokens=1000,
         streaming=True,
-    ))
+    )
 
     _agent = create_agent(
         model,

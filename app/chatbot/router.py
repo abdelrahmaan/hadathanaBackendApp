@@ -93,10 +93,8 @@ async def chat(
             start["session_id"] = session.session_id
         yield _sse(start)
 
-        # Generate title in parallel with the main LLM stream — by the time
-        # the answer finishes, the title is usually already done.
-        title_task = asyncio.create_task(generate_title(request.question))
-
+        # title_task is created inside tracing_context so it appears as a child trace
+        title_task = None
         try:
             with tracing_context(
                 project_name=settings.get_langsmith_project(),
@@ -107,6 +105,9 @@ async def chat(
                 },
                 tags=[settings.app_env],
             ):
+                # Generate title in parallel with the main LLM stream — by the time
+                # the answer finishes, the title is usually already done.
+                title_task = asyncio.create_task(generate_title(request.question))
                 logger.info(
                     "pipeline_llm_start",
                     extra={"event": "pipeline_llm_start", "session_id": session.session_id},
@@ -203,7 +204,8 @@ async def chat(
                 "chat_stream_error",
                 extra={"event": "chat_stream_error", "session_id": session.session_id, "error": str(e)},
             )
-            title_task.cancel()
+            if title_task is not None:
+                title_task.cancel()
             yield _sse({"type": "error", "content": "حدث خطأ أثناء المعالجة."})
             yield _sse({"type": "stream_end"})
             return
