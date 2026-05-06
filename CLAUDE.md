@@ -973,6 +973,90 @@ agent.update_state(config, {"messages": [RemoveMessage(id=old_msg.id)]})
 
 **Dev vs prod**: `InMemorySaver` is fine for dev and single-process deployments. For multi-replica prod, swap to `langgraph-checkpoint-redis` — the interface is identical, only the import changes.
 
+### Tracing & observability (LangSmith)
+
+Every chat request is one LangSmith trace. The visible parent run is named **`Hadathana_agent`** and carries `session_id`, `user_id`, and `app_env` as metadata, plus an `app_env` tag.
+
+**Expected waterfall:**
+```
+Hadathana_agent (parent, run_type="chain", visible in UI)
+├── generate_title              ← parallel @traceable child via asyncio.create_task
+│   └── ChatOpenAI
+└── LangGraph                   ← main agent
+    ├── model → ChatOpenAI
+    └── tools → search_hadiths
+        └── ContextualCompressionRetriever (Qdrant + Cohere rerank)
+```
+
+**The two nesting techniques** — used together in [app/chatbot/router.py](app/chatbot/router.py):
+
+```python
+from langsmith import trace, tracing_context
+
+async with trace(
+    "Hadathana_agent",
+    run_type="chain",
+    project_name=settings.get_langsmith_project(),
+    metadata={"session_id": ..., "user_id": ..., "app_env": ...},
+    tags=[settings.app_env],
+    inputs={"question": request.question},
+) as run:
+    # (A) @traceable function under asyncio.create_task — pass parent explicitly
+    title_task = asyncio.create_task(
+        generate_title(request.question, langsmith_extra={"parent": run})
+    )
+
+    # (B) LangChain/LangGraph Runnable — bridge via tracing_context(parent=run)
+    with tracing_context(parent=run):
+        async for chunk in agent.astream(...):
+            ...
+
+    run.end(outputs={"title": title, "response_chars": ...})
+```
+
+| Child run kind | Pattern | Why |
+|---|---|---|
+| `@traceable` async function called via `asyncio.create_task` | `langsmith_extra={"parent": run}` | `create_task` schedules the coroutine in a fresh context — the LangSmith contextvar is reset, so explicit parent passing is the official escape hatch |
+| LangChain / LangGraph `Runnable` (`.astream` / `.ainvoke`) | `with tracing_context(parent=run):` | `tracing_context` sets the contextvar that LangChain's `LangChainTracer` reads to assign `parent_run_id` to downstream runs |
+| `@traceable` function called inline (no `create_task`) | Nothing — just `await` | Async contextvars propagate naturally on `await` |
+
+**Multiple parallel tasks under one parent** — same pattern scales:
+
+```python
+async with trace("Hadathana_agent", ...) as run:
+    title_task   = asyncio.create_task(generate_title(q,  langsmith_extra={"parent": run}))
+    summary_task = asyncio.create_task(summarize_q(q,    langsmith_extra={"parent": run}))
+    embed_task   = asyncio.create_task(embed_query(q,    langsmith_extra={"parent": run}))
+
+    with tracing_context(parent=run):
+        result = await agent.ainvoke(...)
+
+    title, summary, embed = await asyncio.gather(title_task, summary_task, embed_task)
+```
+
+All four children appear as siblings under `Hadathana_agent` in the waterfall.
+
+**Anti-patterns (don't do):**
+
+| Anti-pattern | What goes wrong |
+|---|---|
+| Wrapping `agent.astream` in `async with trace(...)` *only* | `async with trace()` does **not** set the contextvar in the calling coroutine — LangChain's tracer never sees the parent. Must add `tracing_context(parent=run)`. |
+| Manually seeding `LangChainTracer.run_map` / `order_map` and passing a custom `AsyncCallbackManager` in `config["callbacks"]` | Fights the framework. `tracing_context(parent=run)` is the official bridge — use it. |
+| Relying on `asyncio.create_task` to inherit the LangSmith parent automatically | `create_task` runs in a fresh context — parent contextvar is reset. Use `langsmith_extra={"parent": run}` or `copy_context().run(...)`. |
+| Wrapping `generate_title` in `tracing_context(parent=run)` instead of `langsmith_extra` | `tracing_context` is sync — won't propagate across the `create_task` boundary. `langsmith_extra` is the right tool for `@traceable` functions. |
+
+**Env vars** (set in `.env`):
+```bash
+LANGSMITH_API_KEY_DEV=ls__...
+LANGSMITH_API_KEY_PROD=ls__...
+LANGSMITH_PROJECT_DEV=hadathana_dev
+LANGSMITH_PROJECT=hadathana_prod
+```
+
+`app/main.py` translates these into the canonical `LANGSMITH_TRACING` / `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` env vars at startup, switching by `APP_ENV`.
+
+**Reference:** [LangSmith — Nesting Traces](https://docs.smith.langchain.com/observability/how_to_guides/nest_traces) (the "Combining decorated code with LangGraph and LangChain" pattern is what we use).
+
 ---
 
 ### Hard rules for all AI code
@@ -987,6 +1071,8 @@ agent.update_state(config, {"messages": [RemoveMessage(id=old_msg.id)]})
 | Start with static prompt, add `dynamic_prompt` only when measured | Premature context engineering adds complexity with no benefit |
 | Qdrant sync after every Mongo data update | Run `scripts/sync_qdrant.py`, verify point count matches Mongo doc count |
 | Pin package versions | `langchain>=0.3.15`, `langchain-qdrant>=0.2.0`, `langchain-cohere>=0.4.0` |
+| Nest LangChain Runnables under a `trace()` parent with `tracing_context(parent=run)` | `async with trace()` alone does NOT set the contextvar that LangChain reads — the `tracing_context` bridge is required |
+| Nest `@traceable` calls inside `asyncio.create_task` with `langsmith_extra={"parent": run}` | `create_task` runs in a fresh context; the LangSmith parent contextvar is reset, so explicit parent passing is the official fix |
 
 ### New env vars (chatbot)
 
