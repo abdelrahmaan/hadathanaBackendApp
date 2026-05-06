@@ -216,24 +216,24 @@ def assemble_summary(
     if llm_result is None:
         return None
 
-    narrator_info = bio_doc.get("narrator_info", [])
-    tarajim = bio_doc.get("tarajim", [])
+    narrator_info = bio_doc.get("narrator_info") or []
+    tarajim = bio_doc.get("tarajim") or []
 
-    teachers = stats_doc.get("teachers", []) if stats_doc else []
-    students = stats_doc.get("students", []) if stats_doc else []
+    teachers = (stats_doc.get("teachers") or []) if stats_doc else []
+    students = (stats_doc.get("students") or []) if stats_doc else []
 
     return NarratorSummary(
-        full_name=bio_doc.get("full_name", ""),
-        kunya=llm_result.kunya,
-        era=llm_result.era,
-        location=llm_result.location,
-        classification=bio_doc.get("rank", ""),
+        full_name=bio_doc.get("full_name") or "",
+        kunya=llm_result.kunya or None,
+        era=llm_result.era or None,
+        location=llm_result.location or None,
+        classification=bio_doc.get("rank") or "",
         hadith_count=parse_hadith_count(narrator_info),
         transmission_stats=parse_transmission_stats(narrator_info),
         top_teachers=build_top_relations(teachers, n=5),
         top_students=build_top_relations(students, n=5),
         tarajim_sources=[t["source"] for t in tarajim if t.get("source")],
-        notes=llm_result.notes,
+        notes=llm_result.notes or None,
     )
 
 
@@ -329,9 +329,9 @@ def main():
 
             llm_result = call_llm(
                 llm_chain,
-                full_name=bio_doc.get("full_name", ""),
-                rank=bio_doc.get("rank", ""),
-                tarajim=bio_doc.get("tarajim", []),
+                full_name=bio_doc.get("full_name") or "",
+                rank=bio_doc.get("rank") or "",
+                tarajim=bio_doc.get("tarajim") or [],
             )
 
             summary = assemble_summary(bio_doc, stats_doc, llm_result)
