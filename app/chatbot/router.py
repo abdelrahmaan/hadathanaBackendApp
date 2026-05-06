@@ -191,7 +191,10 @@ async def chat(
                     },
                 })
 
-                title = await title_task
+                try:
+                    title = await title_task
+                except asyncio.CancelledError:
+                    title = request.question[:50]
                 logger.info(
                     "pipeline_done",
                     extra={"event": "pipeline_done", "session_id": session.session_id, "title": title},
