@@ -22,7 +22,7 @@ from app.chatbot.quota import check_quota, increment_quota
 from app.chatbot.session import append_turn, get_or_create_session, update_session_title
 from app.config import settings
 from app.database import get_client, get_db, get_user_quotas_collection
-from langsmith.run_helpers import tracing_context
+from langsmith import trace, tracing_context
 
 logger = logging.getLogger("hadathana.chatbot.router")
 
@@ -93,10 +93,11 @@ async def chat(
             start["session_id"] = session.session_id
         yield _sse(start)
 
-        # title_task is created inside tracing_context so it appears as a child trace
         title_task = None
         try:
-            with tracing_context(
+            async with trace(
+                "Hadathana_agent",
+                run_type="chain",
                 project_name=settings.get_langsmith_project(),
                 metadata={
                     "session_id": session.session_id,
@@ -104,10 +105,14 @@ async def chat(
                     "app_env": settings.app_env,
                 },
                 tags=[settings.app_env],
-            ):
-                # Generate title in parallel with the main LLM stream — by the time
-                # the answer finishes, the title is usually already done.
-                title_task = asyncio.create_task(generate_title(request.question))
+                inputs={"question": request.question},
+            ) as run:
+                # Generate title in parallel with the main LLM stream. Pass `parent=run`
+                # via langsmith_extra so the @traceable nests under our parent even though
+                # asyncio.create_task detaches from the current trace context.
+                title_task = asyncio.create_task(
+                    generate_title(request.question, langsmith_extra={"parent": run})
+                )
                 logger.info(
                     "pipeline_llm_start",
                     extra={"event": "pipeline_llm_start", "session_id": session.session_id},
@@ -119,19 +124,24 @@ async def chat(
                 ]
                 input_messages = history + [{"role": "user", "content": request.question}]
 
-                async for chunk in agent.astream(
-                    {"messages": input_messages},
-                    stream_mode="messages",
-                    config={"configurable": {"thread_id": session.session_id}},
-                ):
-                    token = _extract_token(chunk)
-                    if not token:
-                        continue
-                    assembled.append(token)
-                    tail = (tail + token)[-120:]  # keep last 120 chars to detect REFS line
-                    # Suppress tokens once the REFS line has started — it's metadata, not content
-                    if "\nREFS:" not in tail:
-                        yield _sse({"type": "content", "content": token})
+                # Nest LangGraph runs under our parent using the official LangSmith bridge:
+                # `tracing_context(parent=run)` sets the contextvar that LangChain's tracer
+                # reads to assign `parent_run_id`. Docs:
+                # https://docs.smith.langchain.com/observability/how_to_guides/nest_traces
+                with tracing_context(parent=run):
+                    async for chunk in agent.astream(
+                        {"messages": input_messages},
+                        stream_mode="messages",
+                        config={"configurable": {"thread_id": session.session_id}},
+                    ):
+                        token = _extract_token(chunk)
+                        if not token:
+                            continue
+                        assembled.append(token)
+                        tail = (tail + token)[-120:]  # keep last 120 chars to detect REFS line
+                        # Suppress tokens once the REFS line has started — it's metadata, not content
+                        if "\nREFS:" not in tail:
+                            yield _sse({"type": "content", "content": token})
 
                 full_content = "".join(assembled)
 
@@ -195,6 +205,7 @@ async def chat(
                     title = await title_task
                 except asyncio.CancelledError:
                     title = request.question[:50]
+                run.end(outputs={"title": title, "response_chars": len(full_content)})
                 logger.info(
                     "pipeline_done",
                     extra={"event": "pipeline_done", "session_id": session.session_id, "title": title},
@@ -206,6 +217,7 @@ async def chat(
             logger.error(
                 "chat_stream_error",
                 extra={"event": "chat_stream_error", "session_id": session.session_id, "error": str(e)},
+                exc_info=True,
             )
             if title_task is not None:
                 title_task.cancel()

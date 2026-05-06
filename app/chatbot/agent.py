@@ -34,7 +34,7 @@ def get_last_docs(thread_id: str) -> list:
     """Pop and return docs stashed by the last search_hadiths call for this thread."""
     return _last_docs.pop(thread_id, [])
 
-@traceable(name="generate_title", run_type="chain")
+@traceable(name="generate_title", run_type="chain", metadata= {"model_name": settings.title_model})
 async def generate_title(question: str) -> str:
     """Generate a short Arabic title for a chat thread from the user's first question.
 
@@ -60,7 +60,7 @@ def build_agent() -> None:
     _retriever = build_hadiths_retriever(get_qdrant_client())
 
 
-    @traceable(name="hadiths_search", run_type="tool")
+    @traceable(name="hadiths_search", run_type="tool", metadata={"vectordb": "Qdrant"})
     async def search_hadiths(query: str, config: RunnableConfig) -> str:
         """
         Search Sahih al-Bukhari hadiths by meaning.
