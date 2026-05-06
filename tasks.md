@@ -233,7 +233,7 @@
 - [x] Prometheus metrics (Phase 1) — request rate, latency, error rate via `/metrics`
 - [x] Grafana dashboards (Phase 2) — API Overview dashboard with 11 panels
 - [ ] Loki + Promtail log aggregation (Phase 3)
-- [ ] Langfuse LLM observability (Phase 4)
+- [x] LangSmith LLM observability (Phase 4) — every chat request traced as `Hadathana_agent` parent run with `session_id`/`user_id`/`app_env` metadata; `generate_title` nested via `langsmith_extra={"parent": run}`; LangGraph nested via `tracing_context(parent=run)`. Touched: `app/main.py`, `app/chatbot/router.py`, `app/chatbot/agent.py`, `requirements.txt`. Plan: `docs/superpowers/plans/2026-05-05-langsmith-observability.md`. Docs: `README.md` § LangSmith Tracing, `CLAUDE.md` § Tracing & observability.
 - [ ] Alerting (Phase 6)
 - [x] Logging infrastructure
 
