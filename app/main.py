@@ -17,9 +17,9 @@ from .config import settings
 
 # Wire LangSmith tracing — must happen before any LangChain import
 if settings.get_langsmith_api_key():
-    os.environ["LANGCHAIN_TRACING_V2"] = "true"
-    os.environ["LANGCHAIN_API_KEY"] = settings.get_langsmith_api_key()
-    os.environ["LANGCHAIN_PROJECT"] = settings.get_langsmith_project()
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGSMITH_API_KEY"] = settings.get_langsmith_api_key()
+    os.environ["LANGSMITH_PROJECT"] = settings.get_langsmith_project()
 from .database import (
     connect,
     disconnect,

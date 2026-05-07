@@ -336,6 +336,88 @@ Vector database for hybrid semantic hadith search. The `hadiths_matn` collection
 
 Access: http://localhost:6333/dashboard
 
+### LangSmith Tracing
+
+Every chat request is traced end-to-end as a single waterfall in LangSmith. Each chat request shows up as one parent run named **`Hadathana_agent`** with `session_id`, `user_id`, and `app_env` attached as metadata, plus an `app_env` tag (`dev` / `prod`).
+
+**Expected waterfall per request:**
+```
+Hadathana_agent (parent — visible in UI)
+├── generate_title (chain)         ← parallel branch via asyncio.create_task
+│   └── ChatOpenAI                 ← OpenRouter title model call
+└── LangGraph (the agent)
+    ├── model → ChatOpenAI         ← main LLM call (decides to use tool)
+    └── tools → search_hadiths
+        └── ContextualCompressionRetriever
+            ├── _LoggingRetriever
+            └── VectorStoreRetriever (Qdrant hybrid)
+```
+
+**Setup** — set the keys in `.env`:
+```bash
+LANGSMITH_API_KEY_DEV=ls__...        # dev tracing key
+LANGSMITH_API_KEY_PROD=ls__...       # prod tracing key
+LANGSMITH_PROJECT_DEV=hadathana_dev
+LANGSMITH_PROJECT=hadathana_prod
+```
+
+`app/main.py` wires the canonical `LANGSMITH_TRACING` / `LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` env vars at startup based on `APP_ENV`.
+
+**How nesting is implemented** in [app/chatbot/router.py](app/chatbot/router.py):
+
+```python
+from langsmith import trace, tracing_context
+
+async with trace(
+    "Hadathana_agent",
+    run_type="chain",
+    project_name=settings.get_langsmith_project(),
+    metadata={"session_id": ..., "user_id": ..., "app_env": ...},
+    tags=[settings.app_env],
+    inputs={"question": request.question},
+) as run:
+    # 1. Parallel @traceable function — pass parent explicitly via langsmith_extra
+    title_task = asyncio.create_task(
+        generate_title(request.question, langsmith_extra={"parent": run})
+    )
+
+    # 2. LangGraph / LangChain Runnable — bridge via tracing_context(parent=run)
+    with tracing_context(parent=run):
+        async for chunk in agent.astream(...):
+            ...
+
+    run.end(outputs={"title": title, "response_chars": len(full_content)})
+```
+
+**Two nesting techniques — when to use which:**
+
+| Child run type | How to nest under parent | Why |
+|---|---|---|
+| `@traceable` async function called via `asyncio.create_task` | `langsmith_extra={"parent": run}` | `create_task` does not inherit the LangSmith contextvar; passing `parent` explicitly is the official escape hatch |
+| LangChain / LangGraph `Runnable` (`.astream` / `.ainvoke`) | `with tracing_context(parent=run):` | `tracing_context` sets the contextvar that LangChain's `LangChainTracer` reads to assign `parent_run_id` |
+| `@traceable` async function called inline (no `create_task`) | Nothing — just call it | Async contextvars propagate naturally on `await` |
+| Multiple parallel tasks under one parent | `langsmith_extra={"parent": run}` on each `create_task` call | Pattern scales — each task gets the same parent, runs appear as siblings under it |
+
+**Parallel tasks under one parent** — example with two background tasks:
+
+```python
+async with trace("Hadathana_agent", ...) as run:
+    title_task   = asyncio.create_task(generate_title(q,  langsmith_extra={"parent": run}))
+    summary_task = asyncio.create_task(summarize_q(q,    langsmith_extra={"parent": run}))
+
+    # Main agent runs in the foreground, also under `run`
+    with tracing_context(parent=run):
+        result = await agent.ainvoke(...)
+
+    title, summary = await asyncio.gather(title_task, summary_task)
+```
+
+All three children (`generate_title`, `summarize_q`, `LangGraph`) appear as siblings under `Hadathana_agent` in the LangSmith waterfall.
+
+**Why we don't rely on `contextvars` alone** — Python's `asyncio.create_task` schedules the coroutine in a fresh context, so the LangSmith contextvar is reset and the run becomes a new root. The `langsmith_extra={"parent": run}` kwarg bypasses contextvars and threads the parent through directly. Reference: [LangSmith — Nesting Traces](https://docs.smith.langchain.com/observability/how_to_guides/nest_traces).
+
+Access traces: https://smith.langchain.com → project `hadathana_dev` (or `hadathana_prod`).
+
 ---
 
 ## Bootstrap (manual / recovery)
@@ -406,6 +488,7 @@ MongoDB session persistence (chat_sessions collection)
 | Auth | `POST /api/v2/chat` requires JWT cookie — returns `401` if unauthenticated |
 | Ownership | Sessions are user-scoped — resuming another user's session returns `403` |
 | Quota | Per-user daily limits (free=3, supporter=10) — atomic MongoDB `$inc`, returns `429` before LLM call |
+| Tracing | Each request is one LangSmith trace named `Hadathana_agent` with `session_id`/`user_id`/`app_env` metadata. `generate_title` runs as a parallel child via `langsmith_extra={"parent": run}`; the LangGraph agent nests via `tracing_context(parent=run)`. See [LangSmith Tracing](#langsmith-tracing). |
 
 ### SSE event stream
 

@@ -1,6 +1,33 @@
 from pydantic import BaseModel
 
 
+class NarratorTransmissionStats(BaseModel):
+    total: int
+    connected: int
+    suspended: int
+    disputed: int
+
+
+class NarratorRelationSummary(BaseModel):
+    rawi_id: int
+    name: str
+    freq: int
+
+
+class NarratorSummary(BaseModel):
+    full_name: str
+    kunya: str | None = None
+    era: str | None = None
+    location: str | None = None
+    classification: str
+    hadith_count: int
+    transmission_stats: NarratorTransmissionStats
+    top_teachers: list[NarratorRelationSummary]
+    top_students: list[NarratorRelationSummary]
+    tarajim_sources: list[str]
+    notes: str | None = None
+
+
 class PodiaNarrator(BaseModel):
     id: str
     rawi_id: int
@@ -59,3 +86,4 @@ class PodiaNarratorTarajem(BaseModel):
     rank_plain: str | None = None
     narrator_info: list[PodiaNarratorInfo]
     tarajim: list[PodiaTarjimaEntry]
+    summary: NarratorSummary | None = None

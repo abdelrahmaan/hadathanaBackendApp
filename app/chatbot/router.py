@@ -22,6 +22,7 @@ from app.chatbot.quota import check_quota, increment_quota
 from app.chatbot.session import append_turn, get_or_create_session, update_session_title
 from app.config import settings
 from app.database import get_client, get_db, get_user_quotas_collection
+from langsmith import trace, tracing_context
 
 logger = logging.getLogger("hadathana.chatbot.router")
 
@@ -92,110 +93,137 @@ async def chat(
             start["session_id"] = session.session_id
         yield _sse(start)
 
-        # Generate title in parallel with the main LLM stream — by the time
-        # the answer finishes, the title is usually already done.
-        title_task = asyncio.create_task(generate_title(request.question))
-
+        title_task = None
         try:
-            logger.info(
-                "pipeline_llm_start",
-                extra={"event": "pipeline_llm_start", "session_id": session.session_id},
-            )
-            # Build history: last 3 QA pairs (up to 6 messages) from MongoDB
-            history = [
-                {"role": msg.role, "content": msg.content}
-                for msg in session.messages[-6:]
-            ]
-            input_messages = history + [{"role": "user", "content": request.question}]
+            async with trace(
+                "Hadathana_agent",
+                run_type="chain",
+                project_name=settings.get_langsmith_project(),
+                metadata={
+                    "session_id": session.session_id,
+                    "user_id": str(user.id),
+                    "app_env": settings.app_env,
+                },
+                tags=[settings.app_env],
+                inputs={"question": request.question},
+            ) as run:
+                # Generate title in parallel with the main LLM stream. Pass `parent=run`
+                # via langsmith_extra so the @traceable nests under our parent even though
+                # asyncio.create_task detaches from the current trace context.
+                title_task = asyncio.create_task(
+                    generate_title(request.question, langsmith_extra={"parent": run})
+                )
+                logger.info(
+                    "pipeline_llm_start",
+                    extra={"event": "pipeline_llm_start", "session_id": session.session_id},
+                )
+                # Build history: last 3 QA pairs (up to 6 messages) from MongoDB
+                history = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in session.messages[-6:]
+                ]
+                input_messages = history + [{"role": "user", "content": request.question}]
 
-            async for chunk in agent.astream(
-                {"messages": input_messages},
-                stream_mode="messages",
-                config={"configurable": {"thread_id": session.session_id}},
-            ):
-                token = _extract_token(chunk)
-                if not token:
-                    continue
-                assembled.append(token)
-                tail = (tail + token)[-120:]  # keep last 120 chars to detect REFS line
-                # Suppress tokens once the REFS line has started — it's metadata, not content
-                if "\nREFS:" not in tail:
-                    yield _sse({"type": "content", "content": token})
+                # Nest LangGraph runs under our parent using the official LangSmith bridge:
+                # `tracing_context(parent=run)` sets the contextvar that LangChain's tracer
+                # reads to assign `parent_run_id`. Docs:
+                # https://docs.smith.langchain.com/observability/how_to_guides/nest_traces
+                with tracing_context(parent=run):
+                    async for chunk in agent.astream(
+                        {"messages": input_messages},
+                        stream_mode="messages",
+                        config={"configurable": {"thread_id": session.session_id}},
+                    ):
+                        token = _extract_token(chunk)
+                        if not token:
+                            continue
+                        assembled.append(token)
+                        tail = (tail + token)[-120:]  # keep last 120 chars to detect REFS line
+                        # Suppress tokens once the REFS line has started — it's metadata, not content
+                        if "\nREFS:" not in tail:
+                            yield _sse({"type": "content", "content": token})
+
+                full_content = "".join(assembled)
+
+                # Extract REFS line written by the LLM (e.g. "REFS:[1,3]") and strip it from content.
+                # refs_found=True means the LLM wrote REFS (even if empty). refs_found=False means no line
+                # at all — we fall back to showing all docs so citations are never silently lost.
+                refs_match = re.search(r'\nREFS:\[([^\]]*)\]\s*$', full_content)
+                referenced: set[int] = set()
+                refs_found: bool = refs_match is not None
+                if refs_match:
+                    raw = refs_match.group(1).strip()
+                    if raw:
+                        referenced = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
+                    full_content = full_content[:refs_match.start()].rstrip()
+
+                logger.info(
+                    "pipeline_llm_done",
+                    extra={
+                        "event": "pipeline_llm_done",
+                        "session_id": session.session_id,
+                        "response_chars": len(full_content),
+                        "refs": sorted(referenced),
+                    },
+                )
+
+                # Use docs already retrieved during the tool call — no second retrieval needed.
+                logger.info(
+                    "pipeline_citations_start",
+                    extra={"event": "pipeline_citations_start", "session_id": session.session_id},
+                )
+                citation_docs = get_last_docs(session.session_id)
+                citations = [
+                    Citation(
+                        resource_id=str(d.metadata.get("_id", "")),
+                        text_span=(d.page_content or "")[:200],
+                        confidence=float(d.metadata.get("relevance_score", 0.0)),
+                        title=d.metadata.get("title", ""),
+                        hadith_url=d.metadata.get("hadith_url", ""),
+                    )
+                    for i, d in enumerate(citation_docs, start=1)
+                    # Filter to only cited hadiths. Two fallback cases:
+                    # - no REFS line at all (refs_found=False): show all docs (graceful degradation)
+                    # - REFS:[] (refs_found=True, referenced={}): show nothing (LLM cited none)
+                    if not refs_found or i in referenced
+                ]
+                logger.info(
+                    "pipeline_citations_done",
+                    extra={"event": "pipeline_citations_done", "session_id": session.session_id, "citations": len(citations)},
+                )
+
+                yield _sse({
+                    "type": "assistant_message_complete",
+                    "data": {
+                        "message_type": "assistant",
+                        "content": full_content,
+                        "citations": [c.model_dump() for c in citations],
+                    },
+                })
+
+                try:
+                    title = await title_task
+                except asyncio.CancelledError:
+                    title = request.question[:50]
+                run.end(outputs={"title": title, "response_chars": len(full_content)})
+                logger.info(
+                    "pipeline_done",
+                    extra={"event": "pipeline_done", "session_id": session.session_id, "title": title},
+                )
+                yield _sse({"type": "thread_rename", "title": title})
+                yield _sse({"type": "stream_end"})
+
         except Exception as e:
             logger.error(
                 "chat_stream_error",
                 extra={"event": "chat_stream_error", "session_id": session.session_id, "error": str(e)},
+                exc_info=True,
             )
-            title_task.cancel()
+            if title_task is not None:
+                title_task.cancel()
             yield _sse({"type": "error", "content": "حدث خطأ أثناء المعالجة."})
             yield _sse({"type": "stream_end"})
             return
-
-        full_content = "".join(assembled)
-
-        # Extract REFS line written by the LLM (e.g. "REFS:[1,3]") and strip it from content.
-        # refs_found=True means the LLM wrote REFS (even if empty). refs_found=False means no line
-        # at all — we fall back to showing all docs so citations are never silently lost.
-        refs_match = re.search(r'\nREFS:\[([^\]]*)\]\s*$', full_content)
-        referenced: set[int] = set()
-        refs_found: bool = refs_match is not None
-        if refs_match:
-            raw = refs_match.group(1).strip()
-            if raw:
-                referenced = {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
-            full_content = full_content[:refs_match.start()].rstrip()
-
-        logger.info(
-            "pipeline_llm_done",
-            extra={
-                "event": "pipeline_llm_done",
-                "session_id": session.session_id,
-                "response_chars": len(full_content),
-                "refs": sorted(referenced),
-            },
-        )
-
-        # Use docs already retrieved during the tool call — no second retrieval needed.
-        logger.info(
-            "pipeline_citations_start",
-            extra={"event": "pipeline_citations_start", "session_id": session.session_id},
-        )
-        citation_docs = get_last_docs(session.session_id)
-        citations = [
-            Citation(
-                resource_id=str(d.metadata.get("_id", "")),
-                text_span=(d.page_content or "")[:200],
-                confidence=float(d.metadata.get("relevance_score", 0.0)),
-                title=d.metadata.get("title", ""),
-                hadith_url=d.metadata.get("hadith_url", ""),
-            )
-            for i, d in enumerate(citation_docs, start=1)
-            # Filter to only cited hadiths. Two fallback cases:
-            # - no REFS line at all (refs_found=False): show all docs (graceful degradation)
-            # - REFS:[] (refs_found=True, referenced={}): show nothing (LLM cited none)
-            if not refs_found or i in referenced
-        ]
-        logger.info(
-            "pipeline_citations_done",
-            extra={"event": "pipeline_citations_done", "session_id": session.session_id, "citations": len(citations)},
-        )
-
-        yield _sse({
-            "type": "assistant_message_complete",
-            "data": {
-                "message_type": "assistant",
-                "content": full_content,
-                "citations": [c.model_dump() for c in citations],
-            },
-        })
-
-        title = await title_task
-        logger.info(
-            "pipeline_done",
-            extra={"event": "pipeline_done", "session_id": session.session_id, "title": title},
-        )
-        yield _sse({"type": "thread_rename", "title": title})
-        yield _sse({"type": "stream_end"})
 
         # Persist conversation turn and title to Mongo after stream is fully sent
         await append_turn(db, session, request.question, full_content, citations)
