@@ -257,8 +257,26 @@
 - [x] 4 unit tests in `tests/test_chatbot_v1.py`
 - [x] Dedicated session API tests in `tests/test_chatbot_sessions.py` covering auth, ownership, list/get/delete, and delete-then-404 flow
 - [x] Per-user daily quota system — `free: 3/day`, `supporter: 10/day`, `unlimited: -1` — tier stored on user, counter in `user_quotas` collection, 429 with Arabic message + upgrade hint on limit
+- [x] Page context injection — `POST /api/v2/chat` now accepts `hadith_id` / `narrator_id`; backend fetches the viewed document from MongoDB and injects it as a system message via `@dynamic_prompt` middleware so the agent can answer context-aware questions without tool calls
 - [ ] Manual eval: test 10+ Arabic questions, tune system prompt
 - [ ] Promote to prod after eval passes
+
+### fix: narrator context uses accurate computed counts, removes misleading notes (2026-05-08)
+**Status**: done
+**Summary**: Two fixes to `_build_narrator_profile()` context text. (1) Hadith count: was using `summary.hadith_count` (scraped from Bukhari Pedia, can diverge by 1–2); now uses `transmission_stats.total` (computed from MongoDB analytics pipeline — matches website UI). (2) Teacher/student counts and notes: `summary.notes` is LLM-synthesized from classical tarajim and may quote historical scholarship figures (e.g. "800 students" for Abu Hurairah) that conflict with the database's computed chain data (101 students). Removed `notes` from context text entirely. Added `عدد الشيوخ` / `عدد التلاميذ` from `analytics_narrator_stats_podia` array lengths — these are the exact counts the website displays. Also removed `transmission_stats` connected/suspended/disputed breakdown (only total shown). The `notes` field is still stored on `NarratorProfile.scholarly_opinion` for the SSE payload.
+**Touched files**:
+- `app/chatbot/agent.py` — `_build_narrator_profile()`: uses `analytics_narrator_stats_podia` for teacher/student counts; removes `notes` and `transmission_stats` breakdown from context text; `format_narrator_context()` updated to accept `stats_doc`; import added
+- `app/chatbot/router.py` — `_fetch_page_context()` now fetches analytics doc in parallel; passes it to `format_narrator_context()`; import added
+- `tests/test_chatbot_narrator_tool.py` — mocks updated for stats collection; assertions updated
+
+### feat: page context injection for chatbot (2026-05-08)
+**Status**: done
+**Summary**: The chatbot can now answer context-aware questions about the page the user is currently viewing. `POST /api/v2/chat` accepts two new optional fields: `hadith_id` (hadith_index) and `narrator_id` (rawi_id). When present, the backend fetches the corresponding document from MongoDB and injects it as an Arabic system message (`سياق الصفحة:`) via LangChain's `@dynamic_prompt` middleware + `context_schema=PageContext`. The agent is given a new Rule 11 instructing it to answer directly from this context for questions about the current page. The old manual narrator-context system message prepend in the router was migrated into the same `page_context_prompt` middleware. Session state (`current_rawi_id`) is unaffected — page context is turn-scoped only.
+**Touched files**:
+- `app/chatbot/models.py` — added `hadith_id: int | None` and `narrator_id: int | None` to `ChatRequest`
+- `app/chatbot/agent.py` — added `PageContext` dataclass, `format_hadith_context()`, `format_narrator_context()`, `@dynamic_prompt page_context_prompt` middleware; updated `create_agent(...)` to use `middleware=[page_context_prompt]` and `context_schema=PageContext`
+- `app/chatbot/router.py` — added `_fetch_page_context()` helper; builds `PageContext` per request; passes `context=page_ctx` to `agent.astream`; removed old manual narrator system-message prepend (now in middleware)
+- `app/chatbot/prompts.py` — added Rule 11 about `سياق الصفحة:` messages
 
 ### feat: per-user daily quota system (2026-04-20)
 **Status**: done
@@ -357,8 +375,13 @@
 - [ ] **Explicit query rewriting** — add a lightweight pre-step that rewrites the user question into a clean Arabic search query before hitting Qdrant. The agent already does this implicitly (seen in logs), but making it explicit improves consistency for low-score cases (e.g. "ما فضل قراءة القرآن؟" scored 0.19).
   - Files: `app/chatbot/agent.py` or new `app/chatbot/rewriter.py`
 
-- [ ] **`search_narrators` tool (V2)** — second Qdrant collection `narrators_bio` for narrator biographies (`processed_podia_narrator_biographies`, 1,780 docs). Agent picks the right tool based on question type (hadith content vs. narrator info).
-  - Files: `app/chatbot/agent.py`, `app/chatbot/retriever.py`, `scripts/embed_narrators.py` (new)
+- [x] **`search_narrators` tool** — agent gets a second tool that queries MongoDB directly (no Qdrant). Two parallel queries: regex on `processed_podia_narrators.full_name_plain` + `name_in_chain_plain`, and regex on `processed_podia_narrator_biographies.summary.kunya` (kunya not embedded in name fields for ~36% of narrators including Umar/Aisha). Returns formatted profile from pre-computed `summary` field. Disambiguation flow when multiple matches; direct `rawi_id` lookup when frontend sends a card click. Session tracks `current_rawi_id` for follow-up questions about the same narrator (REFS-presence heuristic: narrator turns set, hadith turns clear).
+  - Spec: `docs/superpowers/specs/2026-05-05-search-narrators-tool-design.md`
+  - Files: `app/chatbot/agent.py`, `app/chatbot/prompts.py`, `app/chatbot/models.py`, `app/chatbot/session.py`, `app/chatbot/router.py`, `tests/test_chatbot_narrator_tool.py` (new — 9 unit tests, all passing)
+
+- [x] **Structured SSE contract for chat responses (`kind` discriminator)** — `assistant_message_complete.data` now carries a `kind` field (`hadith_answer` | `narrator_profile` | `narrator_disambiguation` | `chitchat`) plus per-kind structured payloads (`narrator` for profile, `narrators[]` for disambiguation). Frontend renders directly from JSON instead of regex-parsing Arabic prose. Backed by a new `_last_narrator` per-thread stash in the agent (mirrors `_last_docs`); narrator-state heuristic was simplified — kind drives `current_rawi_id` updates, replacing the `رقم الراوي:` regex. Naming locked: `classification` (not `rank`), `freq` (not `count`). `narrator_profile` guarantees `rawi_id`/`full_name`/`profile_url` non-null; missing core fields downgrade to `chitchat`. `kind_hint` early event deferred to a future iteration.
+  - Plan: `docs/superpowers/plans/2026-05-07-structured-chat-sse-contract.md`
+  - Files: `app/chatbot/models.py` (new types: `ChatKind`, `NarratorProfile`, `NarratorEntry`, `NarratorRelation`, `TransmissionStats`), `app/chatbot/agent.py` (stash + builder refactor), `app/chatbot/router.py` (kind classification), `tests/test_chatbot_kind_payloads.py` (new — 7 unit tests for builders + stash), `tests/test_chatbot_narrator_tool.py` (stash assertions added), `tests/test_chatbot_smoke.py` (new live tests for narrator profile/disambiguation/rawi_id paths)
 
 - [x] **Swap `InMemorySaver` → durable storage** — Solved by removing `InMemorySaver` entirely and seeding the agent from MongoDB-stored `session.messages` on every request. No Redis needed; MongoDB is already the session-of-truth.
   - Files: `app/chatbot/agent.py`, `app/chatbot/router.py`
@@ -398,6 +421,13 @@
 ---
 
 ## Chore Log
+
+### feat: golden dataset sync (2026-05-12)
+**Status**: done
+**Summary**: Added `app/chatbot/golden_dataset.py` — a self-contained script holding 15 curated Arabic Q&A examples (5 hadith, 5 narrator profile, 2 disambiguation, 3 chitchat) that syncs new entries into LangSmith dataset `f24ed392-0dee-4c34-bbed-b05fc3f1aaac`. Deduplication by question string; idempotent — safe to re-run. Runnable as `python app/chatbot/golden_dataset.py`.
+**Touched files**:
+- `app/chatbot/golden_dataset.py` (new)
+- `tests/test_golden_dataset.py` (new)
 
 ### docs: document prod MongoDB port 27018 + Compass connection (2026-05-04)
 **Status**: done
@@ -804,4 +834,12 @@
 - `tests/test_auth_reset_password.py` (new)
 - `tests/test_bookmarks.py` (new)
 - `README.md` (added Auth and Bookmarks endpoint sections)
+- `tasks.md`
+
+### fix: narrator comparison support & rawi_id hallucination guardrail (2026-05-08)
+**Status**: done
+**Summary**: Added Rules 9 and 10 to `ARABIC_SYSTEM_PROMPT`. Rule 9 forbids the LLM from writing a "رقم الراوي" value unless it appears verbatim in a tool result from the current turn (prevents the bug where "علي بن أبي طالب" disambiguation returned 1066 but the LLM cited 1070 in its answer). Rule 10 requires comparison questions to call `search_narrators` once per narrator and cite the exact `عدد الأحاديث` from each tool result before drawing a conclusion. Added 3 regression-guard tests (2 prompt-presence asserts + 1 `_build_disambiguation` unit test confirming only input rawi_ids are emitted).
+**Touched files**:
+- `app/chatbot/prompts.py` (Rules 9 and 10 appended to ARABIC_SYSTEM_PROMPT)
+- `tests/test_chatbot_narrator_tool.py` (test_prompt_rule_9_present, test_prompt_rule_10_present, test_disambiguation_text_contains_only_returned_rawi_ids)
 - `tasks.md`
